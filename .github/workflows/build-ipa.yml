@@ -1,0 +1,62 @@
+name: Build IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: macos-26
+
+    env:
+      XCODE_VERSION: "26.6"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true
+
+      - name: Install Homebrew dependencies
+        run: brew bundle --file Brewfile
+
+      - name: Cache Carthage
+        uses: actions/cache@v4
+        id: carthage-cache
+        with:
+          path: Carthage
+          key: ${{ runner.os }}-carthage-${{ hashFiles('**/Cartfile.resolved') }}
+          restore-keys: ${{ runner.os }}-carthage-
+
+      - name: Update Carthage
+        run: carthage update --use-xcframeworks --cache-builds
+
+      - name: Resolve Swift packages
+        run: xcodebuild -resolvePackageDependencies -project Swiftfin.xcodeproj -scheme Swiftfin -skipMacroValidation
+
+      - name: Build app
+        run: xcodebuild -project Swiftfin.xcodeproj -scheme Swiftfin -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build/DerivedData CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" -skipMacroValidation build
+
+      - name: Package IPA
+        run: |
+          APP_PATH="$(find build/DerivedData/Build/Products/Release-iphoneos -maxdepth 1 -name '*.app' | head -n 1)"
+          if [ -z "$APP_PATH" ]; then
+            echo "no .app found"
+            exit 1
+          fi
+          mkdir -p build/Payload
+          cp -R "$APP_PATH" build/Payload/
+          cd build
+          zip -qry Swiftfin.ipa Payload/
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Swiftfin-ipa
+          path: build/Swiftfin.ipa
+          if-no-files-found: error
