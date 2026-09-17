@@ -29,7 +29,7 @@ jobs:
         run: xcodebuild -resolvePackageDependencies -project Swiftfin.xcodeproj -scheme Swiftfin -skipMacroValidation 2>&1 | xcbeautify --renderer github-actions
 
       - name: Build app
-        run: xcodebuild -project Swiftfin.xcodeproj -scheme Swiftfin -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build/DerivedData CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" PRODUCT_NAME="Swiftfin Dev" -skipMacroValidation build 2>&1 | xcbeautify --renderer github-actions
+        run: xcodebuild -project Swiftfin.xcodeproj -scheme Swiftfin -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build/DerivedData CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" PRODUCT_NAME="SwiftfinDev" -skipMacroValidation build 2>&1 | xcbeautify --renderer github-actions
 
       - name: Package IPA
         run: |
@@ -41,11 +41,11 @@ jobs:
           mkdir -p build/Payload
           cp -R "$APP_PATH" build/Payload/
           cd build
-          zip -qry "Swiftfin Dev.ipa" Payload/
+          zip -qry SwiftfinDev.ipa Payload/
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: Swiftfin-Dev-ipa
-          path: build/Swiftfin Dev.ipa
+          name: SwiftfinDev-ipa
+          path: build/SwiftfinDev.ipa
           if-no-files-found: error
