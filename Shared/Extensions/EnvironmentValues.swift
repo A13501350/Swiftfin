@@ -11,10 +11,7 @@ import SwiftUI
 extension EnvironmentValues {
 
     @Entry
-    var enabledPosterIndicators: PosterIndicator = .all
-
-    @Entry
-    var useSeriesLandscapeBackdrop: Bool = true
+    var posterConfiguration: PosterConfiguration = .default
 
     @Entry
     var audioOffset: Binding<Duration> = .constant(.zero)
@@ -29,13 +26,13 @@ extension EnvironmentValues {
     var isHighlighted: Bool = true
 
     @Entry
-    var isOverComplexContent: Bool = false
-
-    @Entry
     var isSelected: Bool = false
 
     @Entry
     var playbackSpeed: Binding<Double> = .constant(1)
+
+    @Entry
+    var posterDisplayType: PosterDisplayType = .portrait
 
     @Entry
     var safeAreaInsets: EdgeInsets = UIApplication.shared.keyWindow?.safeAreaInsets.asEdgeInsets ?? .zero

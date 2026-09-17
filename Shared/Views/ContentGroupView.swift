@@ -71,11 +71,11 @@ struct ContentGroupView<Provider: ContentGroupProvider>: View {
             switch viewModel.state {
             case .content:
                 if viewModel.groups.isEmpty {
-                    // TODO: non-error like empty view
-                    ErrorView(error: ErrorMessage(L10n.noResults))
-                        .refreshable {
-                            viewModel.refresh()
-                        }
+                    ContentUnavailableView(
+                        L10n.noResults.localizedCapitalized,
+                        systemImage: "rectangle.on.rectangle.slash"
+                    )
+                    .focusable()
                 } else {
                     contentView
                 }
@@ -83,32 +83,37 @@ struct ContentGroupView<Provider: ContentGroupProvider>: View {
                 viewModel.error.map(ErrorView.init)
             case .initial, .refreshing:
                 ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .ignoresSafeArea(edges: .all)
             }
         }
         .animation(.linear(duration: 0.2), value: viewModel.state)
         .animation(.linear(duration: 0.2), value: viewModel.background.states)
         .navigationTitle(viewModel.provider.displayTitle)
         #if os(iOS)
-            .toolbarTitleDisplayMode(router.isRootOfPath ? .inlineLarge : .inline)
+        .toolbarTitleDisplayMode(router.isRootOfPath ? .inlineLarge : .inline)
         #elseif os(tvOS)
-            .toolbar(router.isRootOfPath ? .hidden : .automatic, for: .navigationBar)
+        .toolbar(router.isRootOfPath ? .hidden : .automatic, for: .navigationBar)
         #endif
-            .onFirstAppear {
-                viewModel.refresh()
-            }
-            .sinceLastDisappear { interval in
-                viewModel.refreshIfNeeded(sinceLastDisappear: interval)
-            }
-            .onSceneWillEnterForeground {
-                viewModel.refreshIfPendingChanges()
-            }
-            .topBarTrailing {
-                if #unavailable(iOS 26.0) {
-                    if viewModel.background.is(.refreshing) {
-                        ProgressView()
-                    }
+        .onFirstAppear {
+            viewModel.refresh()
+        }
+        .refreshable {
+            viewModel.refresh()
+        }
+        .sinceLastDisappear { interval in
+            viewModel.refreshIfNeeded(sinceLastDisappear: interval)
+        }
+        .onSceneWillEnterForeground {
+            viewModel.refreshIfPendingChanges()
+        }
+        .topBarTrailing {
+            if #unavailable(iOS 26.0) {
+                if viewModel.background.is(.refreshing) {
+                    ProgressView()
                 }
             }
-            .environmentObject(focusCoordinator)
+        }
+        .environmentObject(focusCoordinator)
     }
 }

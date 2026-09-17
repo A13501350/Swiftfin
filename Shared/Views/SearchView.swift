@@ -39,7 +39,7 @@ struct SearchView: View {
                 }
                 #if os(tvOS)
                 .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
+                    .foregroundStyle(.secondary)
                 #endif
             }
         }
@@ -97,11 +97,13 @@ struct SearchView: View {
             prompt: L10n.search
         )
         .environmentObject(focusCoordinator)
-        #if os(iOS)
-            .navigationBarFilterDrawer(
-                viewModel: viewModel.filterViewModel,
-                types: enabledDrawerFilters
-            )
+        #if os(tvOS)
+        .edgePadding(.top)
+        #else
+        .navigationBarFilterDrawer(
+            viewModel: viewModel.filterViewModel,
+            types: enabledDrawerFilters
+        )
         #endif
     }
 }

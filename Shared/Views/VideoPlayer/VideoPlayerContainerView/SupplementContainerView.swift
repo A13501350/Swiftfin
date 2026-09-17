@@ -40,6 +40,29 @@ extension VideoPlayer.UIVideoPlayerContainerViewController {
             containerState.isScrubbing
         }
 
+        #if os(iOS)
+        private var isPresentingFullScreenSupplement: Bool {
+            !containerState.isCompact &&
+                containerState.selectedSupplement?.presentationStyle == .expanded
+        }
+
+        private var closeButton: some View {
+            Button {
+                containerState.select(supplement: nil)
+            } label: {
+                Label(L10n.close, systemImage: "chevron.down")
+                    .contentShape(Rectangle())
+            }
+            .frame(
+                width: VideoPlayer.PlaybackControls.Toolbar.buttonSize,
+                height: VideoPlayer.PlaybackControls.Toolbar.buttonSize
+            )
+            .modifier(
+                VideoPlayer.PlaybackControls.OverlayBarButtonStyleModifier()
+            )
+        }
+        #endif
+
         private var defaultTabFocus: SupplementElement? {
             if let id = containerState.selectedSupplement?.id {
                 return .supplementTab(id)
@@ -64,9 +87,9 @@ extension VideoPlayer.UIVideoPlayerContainerViewController {
             }
             #if os(iOS)
             .background {
-                GestureView()
-                    .environment(\.panGestureDirection, .vertical)
-            }
+                    GestureView()
+                        .environment(\.panGestureDirection, .vertical)
+                }
             #endif
         }
 
@@ -79,6 +102,12 @@ extension VideoPlayer.UIVideoPlayerContainerViewController {
                     .disabled(true)
             } content: {
                 HStack(spacing: VideoPlayer.PlaybackControls.Toolbar.supplementButtonSpacing) {
+                    #if os(iOS)
+                    if isPresentingFullScreenSupplement {
+                        closeButton
+                    }
+                    #endif
+
                     if containerState.isGuestSupplement, let supplement = containerState.selectedSupplement {
                         Button(supplement.displayTitle) {
                             containerState.select(supplement: nil)
@@ -139,7 +168,14 @@ extension VideoPlayer.UIVideoPlayerContainerViewController {
                     #else
                     SupplementTabView(
                         items: Array(currentSupplements),
-                        selection: containerState.selectedSupplement?.id
+                        selection: containerState.selectedSupplement?.id,
+                        onPresentedSelectionChange: { id in
+                            let supplement = id.flatMap { currentSupplements[id: $0] }
+                            containerState.containerView?.presentSupplementContainer(
+                                supplement != nil,
+                                presentationStyle: supplement?.presentationStyle
+                            )
+                        }
                     ) { supplement in
                         supplementContainer(for: supplement.supplement)
                             .eraseToAnyView()
@@ -179,7 +215,7 @@ extension VideoPlayer.UIVideoPlayerContainerViewController {
                 .animation(.linear(duration: 0.1), value: isScrubbing)
                 .animation(.bouncy(duration: 0.25, extraBounce: 0.1), value: currentSupplements)
             }
-            .environment(\.isOverComplexContent, true)
+            .withViewContext(.isOverComplexContent)
             .onReceive(manager.$supplements) { newValue in
                 let newSupplements = IdentifiedArray(
                     uniqueElements: newValue.map(AnyMediaPlayerSupplement.init)
@@ -208,6 +244,9 @@ extension VideoPlayer.UIVideoPlayerContainerViewController {
                 }
             }
             #if os(iOS)
+            .onChange(of: containerState.selectedSupplement?.id) { _, id in
+                containerState.containerView?.presentSupplementContainer(id != nil)
+            }
             .environment(
                 \.panAction,
                 .init(

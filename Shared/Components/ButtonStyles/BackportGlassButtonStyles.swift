@@ -6,6 +6,7 @@
 // Copyright (c) 2026 Jellyfin & Jellyfin Contributors
 //
 
+import Defaults
 import SwiftUI
 
 extension BackportButtonStyle where Self == BackportGlassButtonStyle {
@@ -67,6 +68,9 @@ private struct BackportGlassButtonStyleBody: View {
         case prominent
     }
 
+    @Default(.accentColor)
+    private var accentColor
+
     @Environment(\.controlSize)
     private var controlSize
 
@@ -79,15 +83,11 @@ private struct BackportGlassButtonStyleBody: View {
 
     @ViewBuilder
     var body: some View {
-        #if os(tvOS)
-        nativeBody
-        #else
-        if #available(iOS 26.0, *) {
+        if #available(iOS 26.0, *), UIDevice.supportsLiquidGlass {
             nativeBody
         } else {
             fallbackBody
         }
-        #endif
     }
 
     @available(iOS 26.0, tvOS 26.0, *)
@@ -96,10 +96,13 @@ private struct BackportGlassButtonStyleBody: View {
         switch prominence {
         case .standard:
             nativeButton
-                .buttonStyle(.glass)
+                #if !os(iOS)
+                    .buttonStyle(.glass)
+                #endif
         case .prominent:
             nativeButton
                 .buttonStyle(.glassProminent)
+                .tint(prominentTint)
         }
     }
 
@@ -107,6 +110,16 @@ private struct BackportGlassButtonStyleBody: View {
         Button(role: configuration.role) {
             configuration.trigger()
         } label: {
+            buttonLabel
+        }
+    }
+
+    @ViewBuilder
+    private var buttonLabel: some View {
+        if prominence == .prominent, isEnabled {
+            configuration.label
+                .foregroundStyle(prominentTint.overlayColor)
+        } else {
             configuration.label
         }
     }
@@ -150,7 +163,7 @@ private struct BackportGlassButtonStyleBody: View {
     @ViewBuilder
     private var fallbackLabel: some View {
         if isEnabled {
-            configuration.label
+            buttonLabel
         } else {
             configuration.label
                 .foregroundStyle(.tertiary)
@@ -179,7 +192,7 @@ private struct BackportGlassButtonStyleBody: View {
         case .destructive, .cancel:
             .red
         default:
-            .accentColor
+            accentColor
         }
     }
 }
