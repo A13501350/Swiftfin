@@ -29,7 +29,17 @@ jobs:
         run: xcodebuild -resolvePackageDependencies -project Swiftfin.xcodeproj -scheme Swiftfin -skipMacroValidation 2>&1 | xcbeautify --renderer github-actions
 
       - name: Build app
-        run: xcodebuild -project Swiftfin.xcodeproj -scheme Swiftfin -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build/DerivedData CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" PRODUCT_NAME="SwiftfinDev" -skipMacroValidation build 2>&1 | xcbeautify --renderer github-actions
+        run: xcodebuild -project Swiftfin.xcodeproj -scheme Swiftfin -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build/DerivedData CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" -skipMacroValidation build 2>&1 | xcbeautify --renderer github-actions
+
+      - name: Rename app for sideload
+        run: |
+          APP_PATH="$(find build/DerivedData/Build/Products/Release-iphoneos -maxdepth 1 -name '*.app' | head -n 1)"
+          if [ -z "$APP_PATH" ]; then
+            echo "no .app found"
+            exit 1
+          fi
+          /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string SwiftfinDev" "$APP_PATH/Info.plist" 2>/dev/null || \
+          /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName SwiftfinDev" "$APP_PATH/Info.plist"
 
       - name: Package IPA
         run: |
