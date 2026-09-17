@@ -25,22 +25,11 @@ jobs:
       - name: Install Homebrew dependencies
         run: brew bundle --file Brewfile
 
-      - name: Cache Carthage
-        uses: actions/cache@v4
-        id: carthage-cache
-        with:
-          path: Carthage
-          key: ${{ runner.os }}-carthage-${{ hashFiles('**/Cartfile.resolved') }}
-          restore-keys: ${{ runner.os }}-carthage-
-
-      - name: Update Carthage
-        run: carthage update --use-xcframeworks --cache-builds
-
       - name: Resolve Swift packages
-        run: xcodebuild -resolvePackageDependencies -project Swiftfin.xcodeproj -scheme Swiftfin -skipMacroValidation
+        run: xcodebuild -resolvePackageDependencies -project Swiftfin.xcodeproj -scheme Swiftfin -skipMacroValidation 2>&1 | xcbeautify --renderer github-actions
 
       - name: Build app
-        run: xcodebuild -project Swiftfin.xcodeproj -scheme Swiftfin -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build/DerivedData CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" -skipMacroValidation build
+        run: xcodebuild -project Swiftfin.xcodeproj -scheme Swiftfin -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build/DerivedData CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" PRODUCT_NAME="Swiftfin Dev" -skipMacroValidation build 2>&1 | xcbeautify --renderer github-actions
 
       - name: Package IPA
         run: |
@@ -52,11 +41,11 @@ jobs:
           mkdir -p build/Payload
           cp -R "$APP_PATH" build/Payload/
           cd build
-          zip -qry Swiftfin.ipa Payload/
+          zip -qry "Swiftfin Dev.ipa" Payload/
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: Swiftfin-ipa
-          path: build/Swiftfin.ipa
+          name: Swiftfin-Dev-ipa
+          path: build/Swiftfin Dev.ipa
           if-no-files-found: error
