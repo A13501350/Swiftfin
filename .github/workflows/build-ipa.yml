@@ -25,6 +25,14 @@ jobs:
       - name: Install Homebrew dependencies
         run: brew bundle --file Brewfile
 
+      - name: Restore Xcode cache
+        uses: irgaly/xcode-cache@v1
+        with:
+          key: xcode-cache-${{ github.sha }}
+          restore-keys: xcode-cache-
+          deriveddata-directory: build/DerivedData
+          sourcepackages-directory: build/DerivedData/SourcePackages
+
       - name: Resolve Swift packages
         run: xcodebuild -resolvePackageDependencies -project Swiftfin.xcodeproj -scheme Swiftfin -skipMacroValidation 2>&1 | xcbeautify --renderer github-actions
 
