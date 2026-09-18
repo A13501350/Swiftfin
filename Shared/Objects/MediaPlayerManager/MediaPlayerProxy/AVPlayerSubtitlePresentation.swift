@@ -8,7 +8,6 @@
 
 import Foundation
 @preconcurrency import JellyfinAPI
-import Logging
 import Observation
 
 /// Manages external VTT subtitle presentation for the native AVPlayer proxy.
@@ -36,7 +35,7 @@ final class AVPlayerSubtitlePresentation {
         )
         guard let url = client.url(path: fullPath) else { return }
 
-        let logger = Logger.swiftfin(category: "AVPlayerSubtitle")
+        let logger = Logger.swiftfin()
 
         // Build authenticated request with Jellyfin authorization header
         var request = URLRequest(url: url)
