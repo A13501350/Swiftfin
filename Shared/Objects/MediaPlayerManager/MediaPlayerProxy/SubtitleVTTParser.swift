@@ -28,8 +28,8 @@ enum SubtitleVTTParser {
             let cues = vtt.elements.compactMap { element -> WebVTTCue? in
                 guard case let .cue(cue) = element else { return nil }
 
-                let startTime = cue.timing.start.interval
-                let endTime = cue.timing.end.interval
+                let startTime = cue.metadata.timing.start.interval
+                let endTime = cue.metadata.timing.end.interval
                 let text = flattenPayload(cue.payload)
 
                 guard !text.isEmpty else { return nil }
@@ -44,11 +44,11 @@ enum SubtitleVTTParser {
         }
     }
 
-    private static func flattenPayload(_ payload: WebVTTParser.WebVTT.CuePayload) -> String {
+    private static func flattenPayload(_ payload: WebVTT.CuePayload) -> String {
         payload.components.map { flattenComponent($0) }.joined()
     }
 
-    private static func flattenComponent(_ component: WebVTTParser.WebVTT.CuePayload.Component) -> String {
+    private static func flattenComponent(_ component: WebVTT.CuePayload.Component) -> String {
         switch component {
         case let .plain(text):
             return text
