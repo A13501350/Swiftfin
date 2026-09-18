@@ -59,6 +59,11 @@ final class AVPlayerSubtitlePresentation {
                 let parsedCues = WebVTTParser.parse(content)
                 logger.info("Loaded \(parsedCues.count) VTT cues for stream index \(streamIndex)")
 
+                if parsedCues.isEmpty {
+                    let preview = String(content.prefix(500))
+                    logger.warning("VTT parse returned 0 cues. Content preview: \(preview)")
+                }
+
                 self.cues = parsedCues
             } catch {
                 logger.error("Failed to fetch VTT subtitle: \(error.localizedDescription)")
