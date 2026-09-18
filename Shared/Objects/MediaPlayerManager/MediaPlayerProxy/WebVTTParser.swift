@@ -7,6 +7,7 @@
 //
 
 import Foundation
+import Logging
 
 /// A minimal WebVTT parser for external subtitle sidecar files.
 /// Parses timestamp cues from VTT content without depending on MPVUI.
