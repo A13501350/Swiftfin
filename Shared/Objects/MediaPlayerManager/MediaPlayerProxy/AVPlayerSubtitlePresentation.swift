@@ -8,6 +8,7 @@
 
 import Foundation
 @preconcurrency import JellyfinAPI
+import Logging
 import Observation
 
 /// Manages external VTT subtitle presentation for the native AVPlayer proxy.
