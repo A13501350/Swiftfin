@@ -8,6 +8,10 @@
 
 /* Begin PBXBuildFile section */
 		53ABFDDC267972BF00886593 /* TVServices.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 53ABFDDB267972BF00886593 /* TVServices.framework */; };
+		AA000000000000000000A001 /* WebVTTParser in Frameworks */ = {isa = PBXBuildFile; productRef = AA000000000000000000C001 /* WebVTTParser */; };
+		AA000000000000000000A002 /* Parsing in Frameworks */ = {isa = PBXBuildFile; productRef = AA000000000000000000C002 /* Parsing */; };
+		AA000000000000000000A003 /* WebVTTParser in Frameworks */ = {isa = PBXBuildFile; productRef = AA000000000000000000C003 /* WebVTTParser */; };
+		AA000000000000000000A004 /* Parsing in Frameworks */ = {isa = PBXBuildFile; productRef = AA000000000000000000C004 /* Parsing */; };
 		62666DFD27E5014F00EC0ECD /* AudioToolbox.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5362E4AE267D40B5000E2F71 /* AudioToolbox.framework */; };
 		62666DFE27E5015700EC0ECD /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5362E4AA267D40AD000E2F71 /* AVFoundation.framework */; };
 		62666DFF27E5016400EC0ECD /* CFNetwork.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5362E4B0267D40B9000E2F71 /* CFNetwork.framework */; };
@@ -292,6 +296,8 @@
 				E1E2D7BF2E3FD936004E2E5F /* Transmission in Frameworks */,
 				E13AF3B628A0C598009093AB /* Nuke in Frameworks */,
 				E12186DE2718F1C50010884C /* Defaults in Frameworks */,
+				AA000000000000000000A003 /* WebVTTParser in Frameworks */,
+				AA000000000000000000A004 /* Parsing in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -370,6 +376,8 @@
 				E1A76F1A2E8369A500A5F2C1 /* StatefulMacros in Frameworks */,
 				62666E3F27E5040300EC0ECD /* SystemConfiguration.framework in Frameworks */,
 				E164308C2E3AA9710028D4E8 /* Transmission in Frameworks */,
+				AA000000000000000000A001 /* WebVTTParser in Frameworks */,
+				AA000000000000000000A002 /* Parsing in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -508,6 +516,8 @@
 				E12CDBC02FFB593800828742 /* CollectionVGrid */,
 				E144DBFB30464F3A009B85B5 /* SwiftVLC */,
 				E16C08F8305A386900895062 /* CollectionHStack */,
+				AA000000000000000000C003 /* WebVTTParser */,
+				AA000000000000000000C004 /* Parsing */,
 			);
 			productName = "JellyfinPlayer tvOS";
 			productReference = 535870602669D21600D05A09 /* Swiftfin tvOS.app */;
@@ -588,6 +598,8 @@
 				E144DBF830464F3A009B85B5 /* SwiftVLC */,
 				E16C08F3305A350C00895062 /* CollectionHStack */,
 				E16C08F6305A385900895062 /* CollectionHStack */,
+				AA000000000000000000C001 /* WebVTTParser */,
+				AA000000000000000000C002 /* Parsing */,
 			);
 			productName = JellyfinPlayer;
 			productReference = 5377CBF1263B596A003A4E83 /* Swiftfin iOS.app */;
@@ -703,6 +715,8 @@
 				E12CDBBD2FFB592A00828742 /* XCRemoteSwiftPackageReference "CollectionVGrid" */,
 				E144DBF730464F3A009B85B5 /* XCRemoteSwiftPackageReference "SwiftVLC" */,
 				E16C08F5305A385900895062 /* XCRemoteSwiftPackageReference "CollectionHStack" */,
+				AA000000000000000000B001 /* XCRemoteSwiftPackageReference "swift-webvtt-parser" */,
+				AA000000000000000000B002 /* XCRemoteSwiftPackageReference "swift-parsing" */,
 			);
 			productRefGroup = 5377CBF2263B596A003A4E83 /* Products */;
 			projectDirPath = "";
@@ -1387,6 +1401,22 @@
 				minimumVersion = 5.0.0;
 			};
 		};
+		AA000000000000000000B001 /* XCRemoteSwiftPackageReference "swift-webvtt-parser" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/mihai8804858/swift-webvtt-parser";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.0.0;
+			};
+		};
+		AA000000000000000000B002 /* XCRemoteSwiftPackageReference "swift-parsing" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/pointfreeco/swift-parsing";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.13.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -1774,6 +1804,26 @@
 		E1FADDF02E84B63600FB310E /* StatefulMacros */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = StatefulMacros;
+		};
+		AA000000000000000000C001 /* WebVTTParser */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AA000000000000000000B001 /* XCRemoteSwiftPackageReference "swift-webvtt-parser" */;
+			productName = WebVTTParser;
+		};
+		AA000000000000000000C002 /* Parsing */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AA000000000000000000B002 /* XCRemoteSwiftPackageReference "swift-parsing" */;
+			productName = Parsing;
+		};
+		AA000000000000000000C003 /* WebVTTParser */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AA000000000000000000B001 /* XCRemoteSwiftPackageReference "swift-webvtt-parser" */;
+			productName = WebVTTParser;
+		};
+		AA000000000000000000C004 /* Parsing */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AA000000000000000000B002 /* XCRemoteSwiftPackageReference "swift-parsing" */;
+			productName = Parsing;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

@@ -63,15 +63,12 @@ final class AVPlayerSubtitlePresentation {
                     return
                 }
 
-                let parsedCues = WebVTTParser.parse(content)
+                let parsedCues = SubtitleVTTParser.parse(content)
                 logger.info("Loaded \(parsedCues.count) VTT cues for stream index \(streamIndex)")
 
                 if parsedCues.isEmpty {
-                    let preview = String(content.prefix(1000))
+                    let preview = String(content.prefix(500))
                     logger.warning("VTT parse returned 0 cues. Content preview:\n\(preview)")
-                    // Also log the raw bytes for debugging
-                    let hexPreview = data.prefix(200).map { String(format: "%02x", $0) }.joined(separator: " ")
-                    logger.warning("Raw hex (first 200 bytes): \(hexPreview)")
                 }
 
                 self.cues = parsedCues

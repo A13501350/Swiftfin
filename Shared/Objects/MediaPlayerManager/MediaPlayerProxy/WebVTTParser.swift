@@ -8,147 +8,70 @@
 
 import Foundation
 import Logging
+import WebVTTParser
 
-/// A minimal WebVTT parser for external subtitle sidecar files.
-/// Parses timestamp cues from VTT content without depending on MPVUI.
 struct WebVTTCue: Sendable {
     let startTime: TimeInterval
     let endTime: TimeInterval
     let text: String
 }
 
-struct WebVTTParser: Sendable {
+enum SubtitleVTTParser {
 
     private static let logger = Logger.swiftfin()
 
-    /// Parse WebVTT content into an array of timestamped cues.
     static func parse(_ content: String) -> [WebVTTCue] {
-        var cues: [WebVTTCue] = []
-        // Normalize line endings: split on any newline, then strip \r
-        let rawLines = content.components(separatedBy: .newlines)
-        let lines = rawLines.map { $0.trimmingCharacters(in: .init(charactersIn: "\r")) }
+        let parser = WebVTTParser()
 
-        var i = 0
+        do {
+            let vtt = try parser.parse(content)
+            let cues = vtt.elements.compactMap { element -> WebVTTCue? in
+                guard case let .cue(cue) = element else { return nil }
 
-        // Skip the WEBVTT header and any preceding blank lines / NOTE blocks
-        while i < lines.count {
-            let line = lines[i]
-            if line.hasPrefix("WEBVTT") || line.isEmpty || line.hasPrefix("NOTE") {
-                i += 1
-                // Skip NOTE block (until next empty line)
-                if line.hasPrefix("NOTE") {
-                    while i < lines.count && !lines[i].isEmpty {
-                        i += 1
-                    }
-                }
-                continue
+                let startTime = cue.timing.start.interval
+                let endTime = cue.timing.end.interval
+                let text = flattenPayload(cue.payload)
+
+                guard !text.isEmpty else { return nil }
+                return WebVTTCue(startTime: startTime, endTime: endTime, text: text)
             }
-            break
+
+            logger.info("Parsed \(cues.count) VTT cues via WebVTTParser library")
+            return cues
+        } catch {
+            logger.error("WebVTTParser library failed: \(error.localizedDescription)")
+            return []
         }
-
-        logger.info("VTT header skip done, i=\(i), total lines=\(lines.count)")
-
-        // Parse cue blocks
-        while i < lines.count {
-            let line = lines[i].trimmingCharacters(in: .whitespaces)
-
-            // Skip empty lines
-            if line.isEmpty {
-                i += 1
-                continue
-            }
-
-            // Skip cue identifiers (lines that don't contain -->)
-            if !line.contains("-->") {
-                i += 1
-                continue
-            }
-
-            // Parse timestamp line
-            guard let cue = parseCueBlock(timestampLine: line, lines: lines, index: &i) else {
-                continue
-            }
-
-            cues.append(cue)
-        }
-
-        return cues
     }
 
-    private static func parseCueBlock(
-        timestampLine: String,
-        lines: [String],
-        index: inout Int
-    ) -> WebVTTCue? {
-        let parts = timestampLine.components(separatedBy: "-->")
-        guard parts.count == 2 else {
-            logger.warning("Cue block has no '-->' separator: \(timestampLine)")
-            index += 1
-            return nil
-        }
-
-        let startStr = parts[0].trimmingCharacters(in: .whitespaces)
-        let endStr = parts[1]
-            .trimmingCharacters(in: .whitespaces)
-            .components(separatedBy: .whitespaces)
-            .first ?? ""
-
-        guard let startTime = parseTimestamp(startStr),
-              let endTime = parseTimestamp(endStr)
-        else {
-            logger.warning("Failed to parse timestamps: start='\(startStr)' end='\(endStr)'")
-            index += 1
-            return nil
-        }
-
-        index += 1
-
-        // Collect cue text (lines until empty line or end of file)
-        var textLines: [String] = []
-        while index < lines.count {
-            let line = lines[index]
-            if line.trimmingCharacters(in: .whitespaces).isEmpty {
-                index += 1
-                break
-            }
-            textLines.append(line)
-            index += 1
-        }
-
-        let text = textLines.joined(separator: "\n")
-        guard !text.isEmpty else { return nil }
-
-        logger.info("Parsed cue: \(startTime)s -> \(endTime)s, text=\(text.prefix(50))")
-        return WebVTTCue(startTime: startTime, endTime: endTime, text: text)
+    private static func flattenPayload(_ payload: WebVTTParser.WebVTT.CuePayload) -> String {
+        payload.components.map { flattenComponent($0) }.joined()
     }
 
-    /// Parse a VTT timestamp string like "00:01:23.456" or "01:23.456" or "1:23:45.678" into seconds.
-    private static func parseTimestamp(_ string: String) -> TimeInterval? {
-        let components = string.split(separator: ":")
-        guard !components.isEmpty else {
-            logger.warning("Empty timestamp string")
-            return nil
+    private static func flattenComponent(_ component: WebVTTParser.WebVTT.CuePayload.Component) -> String {
+        switch component {
+        case let .plain(text):
+            return text
+        case let .bold(_, children):
+            return children.map { flattenComponent($0) }.joined()
+        case let .italic(_, children):
+            return children.map { flattenComponent($0) }.joined()
+        case let .underline(_, children):
+            return children.map { flattenComponent($0) }.joined()
+        case let .ruby(_, children):
+            return children.map { flattenComponent($0) }.joined()
+        case let .rubyText(_, children):
+            return children.map { flattenComponent($0) }.joined()
+        case let .class(_, children):
+            return children.map { flattenComponent($0) }.joined()
+        case let .voice(_, _, children):
+            return children.map { flattenComponent($0) }.joined()
+        case let .timestamp(_, children):
+            return children.map { flattenComponent($0) }.joined()
+        case let .language(_, _, children):
+            return children.map { flattenComponent($0) }.joined()
+        @unknown default:
+            return ""
         }
-
-        var hours: Double = 0
-        var minutes: Double = 0
-        var seconds: Double = 0
-
-        switch components.count {
-        case 3:
-            hours = Double(components[0]) ?? 0
-            minutes = Double(components[1]) ?? 0
-            seconds = Double(components[2]) ?? 0
-        case 2:
-            minutes = Double(components[0]) ?? 0
-            seconds = Double(components[1]) ?? 0
-        case 1:
-            seconds = Double(components[0]) ?? 0
-        default:
-            logger.warning("Unexpected timestamp components count \(components.count): \(string)")
-            return nil
-        }
-
-        return hours * 3600 + minutes * 60 + seconds
     }
 }
