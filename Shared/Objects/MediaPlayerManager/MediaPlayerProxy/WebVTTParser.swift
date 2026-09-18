@@ -18,19 +18,23 @@ struct WebVTTCue: Sendable {
 
 struct WebVTTParser: Sendable {
 
+    private static let logger = Logger.swiftfin()
+
     /// Parse WebVTT content into an array of timestamped cues.
     static func parse(_ content: String) -> [WebVTTCue] {
         var cues: [WebVTTCue] = []
-        let lines = content.components(separatedBy: .newlines)
+        // Normalize line endings: split on any newline, then strip \r
+        let rawLines = content.components(separatedBy: .newlines)
+        let lines = rawLines.map { $0.trimmingCharacters(in: .init(charactersIn: "\r")) }
 
         var i = 0
 
-        // Skip the WEBVTT header
+        // Skip the WEBVTT header and any preceding blank lines / NOTE blocks
         while i < lines.count {
             let line = lines[i]
             if line.hasPrefix("WEBVTT") || line.isEmpty || line.hasPrefix("NOTE") {
                 i += 1
-                // Skip NOTE block
+                // Skip NOTE block (until next empty line)
                 if line.hasPrefix("NOTE") {
                     while i < lines.count && !lines[i].isEmpty {
                         i += 1
@@ -40,6 +44,8 @@ struct WebVTTParser: Sendable {
             }
             break
         }
+
+        logger.debug("Header skip done, i=\(i), total lines=\(lines.count)")
 
         // Parse cue blocks
         while i < lines.count {
@@ -75,6 +81,7 @@ struct WebVTTParser: Sendable {
     ) -> WebVTTCue? {
         let parts = timestampLine.components(separatedBy: "-->")
         guard parts.count == 2 else {
+            logger.warning("Cue block has no '-->' separator: \(timestampLine)")
             index += 1
             return nil
         }
@@ -88,6 +95,7 @@ struct WebVTTParser: Sendable {
         guard let startTime = parseTimestamp(startStr),
               let endTime = parseTimestamp(endStr)
         else {
+            logger.warning("Failed to parse timestamps: start='\(startStr)' end='\(endStr)'")
             index += 1
             return nil
         }
@@ -109,13 +117,17 @@ struct WebVTTParser: Sendable {
         let text = textLines.joined(separator: "\n")
         guard !text.isEmpty else { return nil }
 
+        logger.debug("Parsed cue: \(startTime)s -> \(endTime)s, text=\(text.prefix(50))")
         return WebVTTCue(startTime: startTime, endTime: endTime, text: text)
     }
 
     /// Parse a VTT timestamp string like "00:01:23.456" or "01:23.456" or "1:23:45.678" into seconds.
     private static func parseTimestamp(_ string: String) -> TimeInterval? {
         let components = string.split(separator: ":")
-        guard !components.isEmpty else { return nil }
+        guard !components.isEmpty else {
+            logger.warning("Empty timestamp string")
+            return nil
+        }
 
         var hours: Double = 0
         var minutes: Double = 0
@@ -132,6 +144,7 @@ struct WebVTTParser: Sendable {
         case 1:
             seconds = Double(components[0]) ?? 0
         default:
+            logger.warning("Unexpected timestamp components count \(components.count): \(string)")
             return nil
         }
 

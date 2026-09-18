@@ -46,11 +46,18 @@ final class AVPlayerSubtitlePresentation {
             request.setValue(authHeader, forHTTPHeaderField: "X-Emby-Authorization")
         }
 
+        logger.info("Fetching external VTT subtitle from: \(url.absoluteString)")
+
         Task { [weak self] in
             guard let self else { return }
 
             do {
-                let (data, _) = try await URLSession.shared.data(for: request)
+                let (data, response) = try await URLSession.shared.data(for: request)
+
+                if let httpResponse = response as? HTTPURLResponse {
+                    logger.info("VTT HTTP status: \(httpResponse.statusCode), data size: \(data.count) bytes")
+                }
+
                 guard let content = String(data: data, encoding: .utf8) else {
                     logger.warning("Failed to decode VTT content for stream index \(streamIndex)")
                     return
@@ -60,8 +67,11 @@ final class AVPlayerSubtitlePresentation {
                 logger.info("Loaded \(parsedCues.count) VTT cues for stream index \(streamIndex)")
 
                 if parsedCues.isEmpty {
-                    let preview = String(content.prefix(500))
-                    logger.warning("VTT parse returned 0 cues. Content preview: \(preview)")
+                    let preview = String(content.prefix(1000))
+                    logger.warning("VTT parse returned 0 cues. Content preview:\n\(preview)")
+                    // Also log the raw bytes for debugging
+                    let hexPreview = data.prefix(200).map { String(format: "%02x", $0) }.joined(separator: " ")
+                    logger.warning("Raw hex (first 200 bytes): \(hexPreview)")
                 }
 
                 self.cues = parsedCues
