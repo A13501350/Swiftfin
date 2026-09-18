@@ -32,6 +32,7 @@ jobs:
           restore-keys: xcode-cache-
           deriveddata-directory: build/DerivedData
           sourcepackages-directory: build/DerivedData/SourcePackages
+          swiftpm-cache-restore-keys: irgaly/xcode-cache-sourcepackages-
 
       - name: Resolve Swift packages
         run: xcodebuild -resolvePackageDependencies -project Swiftfin.xcodeproj -scheme Swiftfin -skipMacroValidation 2>&1 | xcbeautify --renderer github-actions
