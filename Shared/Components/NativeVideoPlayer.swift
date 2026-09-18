@@ -89,6 +89,8 @@ extension NativeVideoPlayer {
 
         private let proxy: AVMediaPlayerProxy
         private let subtitleLabel = UILabel()
+        private var lastSubtitleText: String = ""
+        private var displayLink: CADisplayLink?
 
         init(proxy: AVMediaPlayerProxy) {
             self.proxy = proxy
@@ -133,18 +135,31 @@ extension NativeVideoPlayer {
                 subtitleLabel.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -20),
             ])
 
-            observeSubtitle()
+            startSubtitleDisplayLink()
         }
 
-        private func observeSubtitle() {
-            observe { [weak self] in
-                guard let self else { return }
-                let text = self.proxy.subtitlePresentation.currentText
-                Task { @MainActor in
-                    self.subtitleLabel.isHidden = text.isEmpty
-                    self.subtitleLabel.text = text
-                }
-            }
+        override func viewWillDisappear(_ animated: Bool) {
+            super.viewWillDisappear(animated)
+            stopSubtitleDisplayLink()
+        }
+
+        private func startSubtitleDisplayLink() {
+            let link = CADisplayLink(target: self, selector: #selector(updateSubtitle))
+            link.add(to: .main, forMode: .common)
+            displayLink = link
+        }
+
+        private func stopSubtitleDisplayLink() {
+            displayLink?.invalidate()
+            displayLink = nil
+        }
+
+        @objc private func updateSubtitle() {
+            let text = proxy.subtitlePresentation.currentText
+            guard text != lastSubtitleText else { return }
+            lastSubtitleText = text
+            subtitleLabel.isHidden = text.isEmpty
+            subtitleLabel.text = text
         }
     }
 }
