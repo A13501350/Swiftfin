@@ -141,7 +141,7 @@ extension VideoPlayerType {
             SubtitleFormat.xsub
         }
 
-        SubtitleProfile.build(method: .hls) {
+        SubtitleProfile.build(method: .external) {
             SubtitleFormat.vtt
         }
     }

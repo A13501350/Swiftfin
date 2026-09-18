@@ -32,6 +32,7 @@ class AVMediaPlayerProxy: VideoMediaPlayerProxy {
 
     let avPlayerLayer: AVPlayerLayer
     let player: AVPlayer
+    let subtitlePresentation = AVPlayerSubtitlePresentation()
 
 //    private var rateObserver: NSKeyValueObservation!
     private var statusObserver: NSKeyValueObservation!
@@ -88,6 +89,10 @@ class AVMediaPlayerProxy: VideoMediaPlayerProxy {
             }
 
             self.manager?.seconds = newSeconds
+
+            Task { @MainActor in
+                self.subtitlePresentation.update(for: newTime.seconds)
+            }
         }
     }
 
@@ -123,7 +128,17 @@ class AVMediaPlayerProxy: VideoMediaPlayerProxy {
     // TODO: complete
     func setRate(_ rate: Float) {}
     func setAudioStream(_ stream: MediaStream) {}
-    func setSubtitleStream(_ stream: MediaStream) {}
+
+    func setSubtitleStream(_ stream: MediaStream) {
+        subtitlePresentation.clear()
+
+        guard stream.deliveryMethod == .external,
+              stream.index != nil,
+              let client = manager?.userSession?.client
+        else { return }
+
+        subtitlePresentation.load(subtitleStream: stream, client: client)
+    }
 
     func setAspectFill(_ aspectFill: Bool) {
         avPlayerLayer.videoGravity = aspectFill ? .resizeAspectFill : .resizeAspect
@@ -132,6 +147,20 @@ class AVMediaPlayerProxy: VideoMediaPlayerProxy {
     var videoPlayerBody: some View {
         AVPlayerView()
             .environmentObject(self)
+            .overlay {
+                if !subtitlePresentation.currentText.isEmpty {
+                    VStack {
+                        Spacer()
+                        Text(subtitlePresentation.currentText)
+                            .font(.system(size: 21))
+                            .foregroundColor(.white)
+                            .shadow(color: .black, radius: 2, x: 1, y: 1)
+                            .padding(.bottom, 50)
+                            .multilineTextAlignment(.center)
+                            .allowsHitTesting(false)
+                    }
+                }
+            }
     }
 }
 
@@ -139,6 +168,7 @@ extension AVMediaPlayerProxy {
 
     private func playbackStopped() {
         player.pause()
+        subtitlePresentation.clear()
 
         if let timeObserver {
             DispatchQueue.main.async {
@@ -165,6 +195,17 @@ extension AVMediaPlayerProxy {
         newAVPlayerItem.externalMetadata = item.baseItem.avMetadata
 
         player.replaceCurrentItem(with: newAVPlayerItem)
+
+        // Load external subtitle if one is selected
+        subtitlePresentation.clear()
+        if let selectedSubtitleIndex = item.selectedSubtitleStreamIndex,
+           selectedSubtitleIndex != -1,
+           let subtitleStream = item.subtitleStreams.first(where: { $0.index == selectedSubtitleIndex }),
+           subtitleStream.deliveryMethod == .external,
+           let client = manager?.userSession?.client
+        {
+            subtitlePresentation.load(subtitleStream: subtitleStream, client: client)
+        }
 
         // TODO: protect against paused
 //        rateObserver = player.observe(\.rate, options: [.new, .initial]) { _, value in
