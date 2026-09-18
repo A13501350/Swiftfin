@@ -46,7 +46,7 @@ struct WebVTTParser: Sendable {
             break
         }
 
-        logger.debug("Header skip done, i=\(i), total lines=\(lines.count)")
+        logger.info("VTT header skip done, i=\(i), total lines=\(lines.count)")
 
         // Parse cue blocks
         while i < lines.count {
@@ -118,7 +118,7 @@ struct WebVTTParser: Sendable {
         let text = textLines.joined(separator: "\n")
         guard !text.isEmpty else { return nil }
 
-        logger.debug("Parsed cue: \(startTime)s -> \(endTime)s, text=\(text.prefix(50))")
+        logger.info("Parsed cue: \(startTime)s -> \(endTime)s, text=\(text.prefix(50))")
         return WebVTTCue(startTime: startTime, endTime: endTime, text: text)
     }
 
