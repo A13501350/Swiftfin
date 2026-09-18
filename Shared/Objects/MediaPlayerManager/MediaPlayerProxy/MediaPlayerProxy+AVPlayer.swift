@@ -79,7 +79,7 @@ class AVMediaPlayerProxy: VideoMediaPlayerProxy {
         self.avPlayerLayer = AVPlayerLayer(player: player)
 
         timeObserver = player.addPeriodicTimeObserver(
-            forInterval: CMTime(seconds: 1, preferredTimescale: 1000),
+            forInterval: CMTime(seconds: 0.1, preferredTimescale: 1000),
             queue: .main
         ) { newTime in
             let newSeconds = Duration.seconds(newTime.seconds)
@@ -90,9 +90,7 @@ class AVMediaPlayerProxy: VideoMediaPlayerProxy {
 
             self.manager?.seconds = newSeconds
 
-            Task { @MainActor in
-                self.subtitlePresentation.update(for: newTime.seconds)
-            }
+            self.subtitlePresentation.update(for: newTime.seconds)
         }
     }
 

@@ -88,6 +88,7 @@ extension NativeVideoPlayer {
     private class UINativeVideoPlayerViewController: AVPlayerViewController {
 
         private let proxy: AVMediaPlayerProxy
+        private let subtitleLabel = UILabel()
 
         init(proxy: AVMediaPlayerProxy) {
             self.proxy = proxy
@@ -109,6 +110,41 @@ extension NativeVideoPlayer {
         @available(*, unavailable)
         required init?(coder: NSCoder) {
             fatalError("init(coder:) has not been implemented")
+        }
+
+        override func viewDidLoad() {
+            super.viewDidLoad()
+
+            subtitleLabel.numberOfLines = 0
+            subtitleLabel.textAlignment = .center
+            subtitleLabel.textColor = .white
+            subtitleLabel.font = .systemFont(ofSize: 21)
+            subtitleLabel.shadowColor = .black
+            subtitleLabel.shadowOffset = CGSize(width: 1, height: 1)
+            subtitleLabel.layer.shadowRadius = 2
+            subtitleLabel.translatesAutoresizingMaskIntoConstraints = false
+            subtitleLabel.isHidden = true
+            view.addSubview(subtitleLabel)
+
+            NSLayoutConstraint.activate([
+                subtitleLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+                subtitleLabel.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -50),
+                subtitleLabel.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor, constant: 20),
+                subtitleLabel.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -20),
+            ])
+
+            observeSubtitle()
+        }
+
+        private func observeSubtitle() {
+            observe { [weak self] in
+                guard let self else { return }
+                let text = self.proxy.subtitlePresentation.currentText
+                Task { @MainActor in
+                    self.subtitleLabel.isHidden = text.isEmpty
+                    self.subtitleLabel.text = text
+                }
+            }
         }
     }
 }
