@@ -88,24 +88,78 @@ extension HLSManifestInterceptor: AVAssetResourceLoaderDelegate {
 
     private func handleLoadingRequest(_ request: AVAssetResourceLoadingRequest) async {
         let requestURL = request.request.url ?? URL(string: "nil")!
+        let path = requestURL.path.lowercased()
+
+        // Only intercept .m3u8 manifest files — proxy everything else directly
+        if path.hasSuffix(".m3u8") {
+            do {
+                let originalURL = self.originalURL(for: requestURL)
+                let data = try await fetchAndFixManifest(from: originalURL)
+
+                if let infoRequest = request.contentInformationRequest {
+                    infoRequest.contentType = "public.m3u-playlist"
+                    infoRequest.contentLength = Int64(data.count)
+                    infoRequest.isByteRangeAccessSupported = false
+                }
+
+                logger.info("HLS intercept responding \(data.count) bytes for: \(requestURL.absoluteString)")
+                request.dataRequest?.respond(with: data)
+                request.finishLoading()
+            } catch {
+                logger.error("HLS intercept failed for \(requestURL.absoluteString): \(error.localizedDescription)")
+                request.finishLoading(with: error)
+            }
+        } else {
+            // Proxy non-manifest requests (.mp4, etc.) directly
+            await proxyRequest(request)
+        }
+    }
+
+    /// Proxies a non-manifest request directly to the server.
+    private func proxyRequest(_ request: AVAssetResourceLoadingRequest) async {
+        let requestURL = request.request.url ?? URL(string: "nil")!
+        let originalURL = self.originalURL(for: requestURL)
+
         do {
-            // Reconstruct original HTTPS URL from the custom scheme URL
-            let originalURL = self.originalURL(for: requestURL)
+            var urlRequest = URLRequest(url: originalURL)
+            urlRequest.httpMethod = request.request.httpMethod ?? "GET"
 
-            let data = try await fetchAndFixManifest(from: originalURL)
-
-            // Set content information so AVPlayer knows this is an HLS manifest
-            if let infoRequest = request.contentInformationRequest {
-                infoRequest.contentType = "public.m3u-playlist"
-                infoRequest.contentLength = Int64(data.count)
-                infoRequest.isByteRangeAccessSupported = false
+            // Forward headers from the original request
+            if let allHeaders = request.request.allHTTPHeaderFields {
+                for (key, value) in allHeaders {
+                    urlRequest.setValue(value, forHTTPHeaderField: key)
+                }
             }
 
-            logger.info("HLS intercept responding \(data.count) bytes for: \(requestURL.absoluteString)")
+            let (data, response) = try await URLSession.shared.data(for: urlRequest)
+
+            guard let httpResponse = response as? HTTPURLResponse,
+                  (200..<300).contains(httpResponse.statusCode)
+            else {
+                throw NSError(
+                    domain: "HLSManifestInterceptor",
+                    code: -3,
+                    userInfo: [NSLocalizedDescriptionKey: "Proxy failed: \(response)"]
+                )
+            }
+
+            if let infoRequest = request.contentInformationRequest {
+                // Set content type based on file extension
+                if originalURL.path.hasSuffix(".mp4") || originalURL.path.hasSuffix(".cmfv") || originalURL.path.hasSuffix(".cmfa") {
+                    infoRequest.contentType = "public.mpeg-4"
+                } else if originalURL.path.hasSuffix(".m4s") {
+                    infoRequest.contentType = "public.mpeg-4-segment"
+                } else {
+                    infoRequest.contentType = "public.data"
+                }
+                infoRequest.contentLength = Int64(data.count)
+                infoRequest.isByteRangeAccessSupported = true
+            }
+
             request.dataRequest?.respond(with: data)
             request.finishLoading()
         } catch {
-            logger.error("HLS intercept failed for \(requestURL.absoluteString): \(error.localizedDescription)")
+            logger.error("Proxy failed for \(requestURL.absoluteString): \(error.localizedDescription)")
             request.finishLoading(with: error)
         }
     }
