@@ -210,16 +210,16 @@ extension HLSManifestInterceptor: AVAssetResourceLoaderDelegate {
 
             // Rewrite variant playlist URLs (non-comment, non-empty lines)
             if !line.hasPrefix("#") && !line.isEmpty {
-                guard var resolved = URL(string: line, relativeTo: baseURL) else { continue }
-                // Append original query parameters if the resolved URL has none
-                if resolved.query == nil, !originalQueryItems.isEmpty {
-                    var components = URLComponents(url: resolved, resolvingAgainstBaseURL: false)!
-                    components.queryItems = originalQueryItems
-                    resolved = components.url!
-                }
-                guard resolved.scheme != Self.scheme else { continue }
+                guard let absolute = URL(string: line, relativeTo: baseURL)?.absoluteURL else { continue }
+                guard absolute.scheme != Self.scheme else { continue }
 
-                var components = URLComponents(url: resolved, resolvingAgainstBaseURL: false)!
+                // Append original query parameters if the URL has none
+                var components = URLComponents(url: absolute, resolvingAgainstBaseURL: false)!
+                let existingParamNames = Set((components.queryItems ?? []).compactMap(\.name))
+                let newParams = originalQueryItems.filter { !existingParamNames.contains($0.name) }
+                if !newParams.isEmpty {
+                    components.queryItems = (components.queryItems ?? []) + newParams
+                }
                 components.scheme = Self.scheme
                 if let rewritten = components.url {
                     lines[i] = rewritten.absoluteString
