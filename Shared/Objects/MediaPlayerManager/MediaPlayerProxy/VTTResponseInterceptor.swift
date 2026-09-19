@@ -50,7 +50,8 @@ final class VTTResponseInterceptor: URLProtocol {
     }
 
     override func startLoading() {
-        guard let originalRequest = self.request.urlRequest else {
+        let originalRequest = self.request
+        guard originalRequest.url != nil else {
             client?.urlProtocol(self, didFailWithError: NSError(
                 domain: "VTTResponseInterceptor",
                 code: -1,
@@ -60,7 +61,7 @@ final class VTTResponseInterceptor: URLProtocol {
         }
 
         var mutableRequest = originalRequest
-        URLProtocol.setProperty(true, forKey: marker, in: mutableRequest)
+        URLProtocol.setProperty(true, forKey: Self.marker, in: mutableRequest)
 
         dataTask = URLSession.shared.dataTask(with: mutableRequest) { [weak self] data, response, error in
             guard let self else { return }

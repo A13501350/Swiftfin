@@ -226,7 +226,7 @@ extension HLSManifestInterceptor: AVAssetResourceLoaderDelegate {
         guard let endQuote = afterURI.firstIndex(of: "\"") else { return line }
 
         let uriValue = String(afterURI[afterURI.startIndex..<endQuote])
-        guard var resolved = URL(string: uriValue, relativeTo: baseURL) else { return line }
+        guard let resolved = URL(string: uriValue, relativeTo: baseURL) else { return line }
         let absolute = resolved.absoluteURL
         guard absolute.scheme != Self.scheme else { return line }
 
