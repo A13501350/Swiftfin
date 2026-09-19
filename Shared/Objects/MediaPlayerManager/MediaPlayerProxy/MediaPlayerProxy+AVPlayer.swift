@@ -39,6 +39,7 @@ class AVMediaPlayerProxy: VideoMediaPlayerProxy {
     private var timeObserver: Any!
     private var managerItemObserver: AnyCancellable?
     private var managerStateObserver: AnyCancellable?
+    private var manifestInterceptor: HLSManifestInterceptor?
 
     weak var manager: MediaPlayerManager? {
         didSet {
@@ -156,12 +157,26 @@ extension AVMediaPlayerProxy {
             timeControlStatusObserver.invalidate()
             self.timeControlStatusObserver = nil
         }
+
+        manifestInterceptor = nil
     }
 
     private func playNew(item: MediaPlayerItem) {
         let baseItem = item.baseItem
 
-        let newAVPlayerItem = AVPlayerItem(url: item.url)
+        // Use HLS manifest interceptor for transcoded streams to fix X-TIMESTAMP-MAP
+        let newAVPlayerItem: AVPlayerItem
+        if item.mediaSource.transcodingURL != nil,
+           let client = manager?.userSession?.client
+        {
+            let interceptor = HLSManifestInterceptor(url: item.url, client: client)
+            manifestInterceptor = interceptor
+            let asset = interceptor.makeAsset()
+            newAVPlayerItem = AVPlayerItem(asset: asset)
+        } else {
+            manifestInterceptor = nil
+            newAVPlayerItem = AVPlayerItem(url: item.url)
+        }
         newAVPlayerItem.externalMetadata = item.baseItem.avMetadata
 
         player.replaceCurrentItem(with: newAVPlayerItem)
