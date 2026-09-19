@@ -60,7 +60,15 @@ final class VTTResponseInterceptor: URLProtocol {
             return
         }
 
-        var mutableRequest = originalRequest as NSMutableURLRequest
+        guard let mutableRequest = (originalRequest as NSURLRequest).mutableCopy() as? NSMutableURLRequest else {
+            client?.urlProtocol(self, didFailWithError: NSError(
+                domain: "VTTResponseInterceptor",
+                code: -3,
+                userInfo: [NSLocalizedDescriptionKey: "Failed to create mutable request"]
+            ))
+            return
+        }
+
         URLProtocol.setProperty(true, forKey: Self.marker, in: mutableRequest)
 
         dataTask = URLSession.shared.dataTask(with: mutableRequest as URLRequest) { [weak self] data, response, error in
