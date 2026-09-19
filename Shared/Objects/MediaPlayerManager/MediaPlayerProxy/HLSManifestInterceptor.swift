@@ -147,11 +147,15 @@ extension HLSManifestInterceptor: AVAssetResourceLoaderDelegate {
 
         logger.info("Fetched \(data.count) bytes from server")
 
-        // Fix X-TIMESTAMP-MAP line
+        // Fix X-TIMESTAMP-MAP line in all playlist types
         content = fixTimestampMap(content)
 
-        // Rewrite variant playlist URLs to use custom scheme for interception
-        content = rewriteVariantURLs(content)
+        // Only rewrite URLs in master manifests (which contain #EXT-X-STREAM-INF).
+        // Variant/subtitle playlists contain #EXT-X-MAP with binary init segments
+        // (.mp4) that must NOT be intercepted.
+        if content.contains("#EXT-X-STREAM-INF") {
+            content = rewriteVariantURLs(content)
+        }
 
         let preview = String(content.prefix(500))
         logger.info("HLS manifest returned to player:\n\(preview)")
