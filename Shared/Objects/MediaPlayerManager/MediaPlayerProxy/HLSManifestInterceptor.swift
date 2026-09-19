@@ -110,12 +110,11 @@ extension HLSManifestInterceptor: AVAssetResourceLoaderDelegate {
         }
     }
 
-    /// Reconstructs the original HTTPS URL from a custom-scheme request URL.
+    /// Reconstructs the original URL from a custom-scheme request URL.
     private func originalURL(for requestURL: URL) -> URL {
-        // If the request URL uses our custom scheme, convert back to https
         guard requestURL.scheme == Self.scheme else { return requestURL }
         var components = URLComponents(url: requestURL, resolvingAgainstBaseURL: false)!
-        components.scheme = "https"
+        components.scheme = originalURL.scheme
         let result = components.url ?? requestURL
         logger.info("URL mapping: \(requestURL.absoluteString) → \(result.absoluteString)")
         return result
