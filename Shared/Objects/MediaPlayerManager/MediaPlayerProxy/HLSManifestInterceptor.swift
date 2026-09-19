@@ -143,14 +143,26 @@ extension HLSManifestInterceptor: AVAssetResourceLoaderDelegate {
         }
     }
 
-    /// Rewrites variant playlist URLs in master manifest to use custom scheme.
+    /// Rewrites variant and subtitle playlist URLs in master manifest to use custom scheme.
     ///
     /// This ensures AVPlayer routes sub-playlist requests through this delegate,
-    /// allowing us to fix `X-TIMESTAMP-MAP` in variant playlists too.
+    /// allowing us to fix `X-TIMESTAMP-MAP` in all sub-playlists.
     /// Segment URLs are left unchanged (they point directly to the server).
     private func rewriteVariantURLs(_ content: String) -> String {
         var lines = content.components(separatedBy: .newlines)
         var inMaster = false
+
+        // Compute base directory for resolving relative URLs
+        // e.g. https://server/Videos/xxx/master.m3u8?... → https://server/Videos/xxx/
+        let originalComponents = URLComponents(url: originalURL, resolvingAgainstBaseURL: false)!
+        let basePath = (originalComponents.path as NSString).deletingLastPathComponent
+        var baseURLComponents = originalComponents
+        baseURLComponents.path = basePath
+        baseURLComponents.query = nil
+        let baseURL = baseURLComponents.url!
+
+        // Query parameters from the original master manifest URL to preserve
+        let originalQueryItems = originalComponents.queryItems ?? []
 
         for i in lines.indices {
             let line = lines[i].trimmingCharacters(in: .whitespaces)
@@ -159,12 +171,37 @@ extension HLSManifestInterceptor: AVAssetResourceLoaderDelegate {
                 inMaster = true
             }
 
-            // Only rewrite non-comment, non-empty lines in master manifest
-            // (these are variant playlist URLs)
-            if inMaster && !line.hasPrefix("#") && !line.isEmpty {
-                // Resolve relative URLs against the original manifest URL
-                guard let resolved = URL(string: line, relativeTo: originalURL)?
-                    .absoluteURL else { continue }
+            guard inMaster else { continue }
+
+            // Rewrite #EXT-X-MEDIA subtitle playlist URIs
+            if line.hasPrefix("#EXT-X-MEDIA:") && line.contains("URI=\"") {
+                lines[i] = rewriteURIAttribute(
+                    in: line,
+                    baseURL: baseURL,
+                    appendQueryItems: originalQueryItems
+                )
+                continue
+            }
+
+            // Rewrite #EXT-X-IMAGE-STREAM-INF trickplay URI
+            if line.hasPrefix("#EXT-X-IMAGE-STREAM-INF:") && line.contains("URI=\"") {
+                lines[i] = rewriteURIAttribute(
+                    in: line,
+                    baseURL: baseURL,
+                    appendQueryItems: originalQueryItems
+                )
+                continue
+            }
+
+            // Rewrite variant playlist URLs (non-comment, non-empty lines)
+            if !line.hasPrefix("#") && !line.isEmpty {
+                guard var resolved = URL(string: line, relativeTo: baseURL) else { continue }
+                // Append original query parameters if the resolved URL has none
+                if resolved.query == nil, !originalQueryItems.isEmpty {
+                    var components = URLComponents(url: resolved, resolvingAgainstBaseURL: false)!
+                    components.queryItems = originalQueryItems
+                    resolved = components.url!
+                }
                 guard resolved.scheme != Self.scheme else { continue }
 
                 var components = URLComponents(url: resolved, resolvingAgainstBaseURL: false)!
@@ -176,5 +213,36 @@ extension HLSManifestInterceptor: AVAssetResourceLoaderDelegate {
         }
 
         return lines.joined(separator: "\n")
+    }
+
+    /// Rewrites URI="..." attribute value to use custom scheme.
+    private func rewriteURIAttribute(
+        in line: String,
+        baseURL: URL,
+        appendQueryItems: [URLQueryItem]
+    ) -> String {
+        guard let uriRange = line.range(of: "URI=\"") else { return line }
+        let afterURI = line[uriRange.upperBound...]
+        guard let endQuote = afterURI.firstIndex(of: "\"") else { return line }
+
+        let uriValue = String(afterURI[afterURI.startIndex..<endQuote])
+        guard var resolved = URL(string: uriValue, relativeTo: baseURL) else { return line }
+        let absolute = resolved.absoluteURL
+        guard absolute.scheme != Self.scheme else { return line }
+
+        // Merge query parameters: only append those not already present
+        let resolvedComponents = URLComponents(url: absolute, resolvingAgainstBaseURL: false)!
+        let existingParamNames = Set((resolvedComponents.queryItems ?? []).compactMap(\.name))
+        let newParams = appendQueryItems.filter { !existingParamNames.contains($0.name) }
+        var mergedComponents = resolvedComponents
+        if !newParams.isEmpty {
+            mergedComponents.queryItems = (resolvedComponents.queryItems ?? []) + newParams
+        }
+        mergedComponents.scheme = Self.scheme
+        guard let rewritten = mergedComponents.url else { return line }
+
+        return String(line[line.startIndex..<uriRange.lowerBound])
+            + "URI=\"\(rewritten.absoluteString)\""
+            + String(line[line.index(after: endQuote)...])
     }
 }
