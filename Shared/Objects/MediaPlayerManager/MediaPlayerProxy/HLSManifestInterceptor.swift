@@ -186,7 +186,13 @@ extension HLSManifestInterceptor: AVAssetResourceLoaderDelegate {
         // Compute base directory for resolving relative URLs
         // e.g. https://server/Videos/xxx/master.m3u8?... → https://server/Videos/xxx/
         let originalComponents = URLComponents(url: originalURL, resolvingAgainstBaseURL: false)!
-        let basePath = (originalComponents.path as NSString).deletingLastPathComponent
+        var basePath = (originalComponents.path as NSString).deletingLastPathComponent
+        // Ensure trailing slash so relative URLs resolve correctly
+        // e.g. "main.m3u8" relative to "/videos/UUID/" → "/videos/UUID/main.m3u8"
+        //      NOT "/videos/main.m3u8" (which happens without trailing slash)
+        if !basePath.hasSuffix("/") {
+            basePath.append("/")
+        }
         var baseURLComponents = originalComponents
         baseURLComponents.path = basePath
         baseURLComponents.query = nil
