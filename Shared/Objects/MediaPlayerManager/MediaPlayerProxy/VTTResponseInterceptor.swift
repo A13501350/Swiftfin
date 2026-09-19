@@ -60,10 +60,10 @@ final class VTTResponseInterceptor: URLProtocol {
             return
         }
 
-        var mutableRequest = originalRequest
+        var mutableRequest = originalRequest as NSMutableURLRequest
         URLProtocol.setProperty(true, forKey: Self.marker, in: mutableRequest)
 
-        dataTask = URLSession.shared.dataTask(with: mutableRequest) { [weak self] data, response, error in
+        dataTask = URLSession.shared.dataTask(with: mutableRequest as URLRequest) { [weak self] data, response, error in
             guard let self else { return }
 
             if let error {
