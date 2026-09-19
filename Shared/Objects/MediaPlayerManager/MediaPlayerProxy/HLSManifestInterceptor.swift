@@ -87,9 +87,12 @@ extension HLSManifestInterceptor: AVAssetResourceLoaderDelegate {
     // MARK: - Private
 
     private func handleLoadingRequest(_ request: AVAssetResourceLoadingRequest) async {
-        let url = request.request.url?.absoluteString ?? "nil"
+        let requestURL = request.request.url ?? URL(string: "nil")!
         do {
-            let data = try await fetchAndFixManifest()
+            // Reconstruct original HTTPS URL from the custom scheme URL
+            let originalURL = self.originalURL(for: requestURL)
+
+            let data = try await fetchAndFixManifest(from: originalURL)
 
             // Set content information so AVPlayer knows this is an HLS manifest
             if let infoRequest = request.contentInformationRequest {
@@ -98,17 +101,29 @@ extension HLSManifestInterceptor: AVAssetResourceLoaderDelegate {
                 infoRequest.isByteRangeAccessSupported = false
             }
 
-            logger.info("HLS intercept responding \(data.count) bytes for: \(url)")
+            logger.info("HLS intercept responding \(data.count) bytes for: \(requestURL.absoluteString)")
             request.dataRequest?.respond(with: data)
             request.finishLoading()
         } catch {
-            logger.error("HLS intercept failed for \(url): \(error.localizedDescription)")
+            logger.error("HLS intercept failed for \(requestURL.absoluteString): \(error.localizedDescription)")
             request.finishLoading(with: error)
         }
     }
 
-    private func fetchAndFixManifest() async throws -> Data {
-        var urlRequest = URLRequest(url: originalURL)
+    /// Reconstructs the original HTTPS URL from a custom-scheme request URL.
+    private func originalURL(for requestURL: URL) -> URL {
+        // If the request URL uses our custom scheme, convert back to https
+        guard requestURL.scheme == Self.scheme else { return requestURL }
+        var components = URLComponents(url: requestURL, resolvingAgainstBaseURL: false)!
+        components.scheme = "https"
+        let result = components.url ?? requestURL
+        logger.info("URL mapping: \(requestURL.absoluteString) → \(result.absoluteString)")
+        return result
+    }
+
+    private func fetchAndFixManifest(from url: URL) async throws -> Data {
+        logger.info("Fetching manifest from: \(url.absoluteString)")
+        var urlRequest = URLRequest(url: url)
         urlRequest.httpMethod = "GET"
 
         let (data, response) = try await URLSession.shared.data(for: urlRequest)
@@ -130,6 +145,8 @@ extension HLSManifestInterceptor: AVAssetResourceLoaderDelegate {
                 userInfo: [NSLocalizedDescriptionKey: "Manifest is not valid UTF-8"]
             )
         }
+
+        logger.info("Fetched \(data.count) bytes from server")
 
         // Fix X-TIMESTAMP-MAP line
         content = fixTimestampMap(content)
@@ -175,6 +192,10 @@ extension HLSManifestInterceptor: AVAssetResourceLoaderDelegate {
         baseURLComponents.path = basePath
         baseURLComponents.query = nil
         let baseURL = baseURLComponents.url!
+
+        logger.info("Base URL for relative resolution: \(baseURL.absoluteString)")
+        logger.info("Original URL path: \(originalComponents.path)")
+        logger.info("Base path after deletingLastPathComponent: \(basePath)")
 
         // Query parameters from the original master manifest URL to preserve
         let originalQueryItems = originalComponents.queryItems ?? []
