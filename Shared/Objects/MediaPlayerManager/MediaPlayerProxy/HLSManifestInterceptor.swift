@@ -58,6 +58,8 @@ extension HLSManifestInterceptor: AVAssetResourceLoaderDelegate {
         _ resourceLoader: AVAssetResourceLoader,
         shouldWaitForLoadingOfRequestedResource loadingRequest: AVAssetResourceLoadingRequest
     ) -> Bool {
+        let url = loadingRequest.request.url?.absoluteString ?? "nil"
+        logger.info("HLS intercept requested: \(url)")
         Task {
             await handleLoadingRequest(loadingRequest)
         }
@@ -85,12 +87,22 @@ extension HLSManifestInterceptor: AVAssetResourceLoaderDelegate {
     // MARK: - Private
 
     private func handleLoadingRequest(_ request: AVAssetResourceLoadingRequest) async {
+        let url = request.request.url?.absoluteString ?? "nil"
         do {
             let data = try await fetchAndFixManifest()
+
+            // Set content information so AVPlayer knows this is an HLS manifest
+            if let infoRequest = request.contentInformationRequest {
+                infoRequest.contentType = "public.m3u-playlist"
+                infoRequest.contentLength = Int64(data.count)
+                infoRequest.isByteRangeAccessSupported = false
+            }
+
+            logger.info("HLS intercept responding \(data.count) bytes for: \(url)")
             request.dataRequest?.respond(with: data)
             request.finishLoading()
         } catch {
-            logger.error("HLS intercept failed: \(error.localizedDescription)")
+            logger.error("HLS intercept failed for \(url): \(error.localizedDescription)")
             request.finishLoading(with: error)
         }
     }
@@ -124,6 +136,9 @@ extension HLSManifestInterceptor: AVAssetResourceLoaderDelegate {
 
         // Rewrite variant playlist URLs to use custom scheme for interception
         content = rewriteVariantURLs(content)
+
+        let preview = String(content.prefix(500))
+        logger.info("HLS manifest returned to player:\n\(preview)")
 
         return Data(content.utf8)
     }
