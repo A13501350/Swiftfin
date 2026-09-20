@@ -179,8 +179,7 @@ extension AVMediaPlayerProxy {
         let baseItem = item.baseItem
 
         logger.info("playNew: url=\(item.url.absoluteString)")
-        logger.info("playNew: transcodeURL=\(item.mediaSource.transcodingURL?.absoluteString ?? "nil")")
-        logger.info("playNew: mediaType=\(item.mediaSource.mediaStream?.type?.rawValue ?? "nil")")
+        logger.info("playNew: isTranscoding=\(item.mediaSource.transcodingURL != nil)")
 
         // Use HLS manifest interceptor for transcoded streams to fix X-TIMESTAMP-MAP
         let newAVPlayerItem: AVPlayerItem
@@ -234,11 +233,8 @@ extension AVMediaPlayerProxy {
             switch newValue {
             case .failed:
                 logger.error("AVPlayer currentItem.status: FAILED")
-                if let error = self.player.error {
-                    logger.error("AVPlayer error: \(error.localizedDescription)")
-                    if let nsError = error as NSError? {
-                        logger.error("AVPlayer error domain=\(nsError.domain) code=\(nsError.code) userInfo=\(nsError.userInfo)")
-                    }
+                if let error = self.player.error as NSError? {
+                    logger.error("AVPlayer error domain=\(error.domain) code=\(error.code) userInfo=\(error.userInfo)")
                     DispatchQueue.main.async {
                         self.manager?.error(ErrorMessage("AVPlayer error: \(error.localizedDescription)"))
                     }
@@ -267,8 +263,6 @@ extension AVMediaPlayerProxy {
                 )
             case .unknown:
                 logger.info("AVPlayer currentItem.status: unknown")
-            @unknown default:
-                logger.info("AVPlayer currentItem.status: unknown(\(newValue.rawValue))")
             }
         }
 
@@ -276,11 +270,10 @@ extension AVMediaPlayerProxy {
         currentItemObserver = player.observe(\.currentItem, options: [.new]) { [logger] _, value in
             if let item = value.newValue as? AVPlayerItem {
                 logger.info("AVPlayer currentItem changed: status=\(item.status.rawValue) duration=\(item.duration.seconds)s")
-                if let tracks = item.tracks as? [AVPlayerItemTrack] {
-                    logger.info("AVPlayer tracks: \(tracks.count)")
-                    for (idx, track) in tracks.enumerated() {
-                        logger.info("  track[\(idx)]: enabled=\(track.isEnabled) mediaType=\(track.assetTrack?.mediaType.rawValue ?? "nil")")
-                    }
+                let tracks = item.tracks
+                logger.info("AVPlayer tracks: \(tracks.count)")
+                for (idx, track) in tracks.enumerated() {
+                    logger.info("  track[\(idx)]: enabled=\(track.isEnabled) mediaType=\(track.assetTrack?.mediaType.rawValue ?? "nil")")
                 }
             } else {
                 logger.info("AVPlayer currentItem changed: nil")

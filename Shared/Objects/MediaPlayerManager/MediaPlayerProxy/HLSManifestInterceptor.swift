@@ -305,20 +305,22 @@ extension HLSManifestInterceptor: AVAssetResourceLoaderDelegate {
                     let nextLine = lines[nextIndex].trimmingCharacters(in: .whitespaces)
                     logger.info("Found #EXT-X-STREAM-INF, next line[\(nextIndex)]: \(nextLine.prefix(200))")
                     if !nextLine.hasPrefix("#") && !nextLine.isEmpty {
-                        if let resolved = URL(string: nextLine, relativeTo: baseURL),
-                           let absolute = try? resolved.absoluteURL,
-                           absolute.scheme != Self.scheme
-                        {
-                            let resolvedComponents = URLComponents(url: absolute, resolvingAgainstBaseURL: false)!
-                            let existingParamNames = Set((resolvedComponents.queryItems ?? []).compactMap(\.name))
-                            let newParams = originalQueryItems.filter { !existingParamNames.contains($0.name) }
-                            var mergedComponents = resolvedComponents
-                            if !newParams.isEmpty {
-                                mergedComponents.queryItems = (resolvedComponents.queryItems ?? []) + newParams
-                            }
-                            if let rewritten = mergedComponents.url {
-                                logger.info("Variant playlist URL: \(nextLine) → \(rewritten.absoluteString)")
-                                lines[nextIndex] = rewritten.absoluteString
+                        if let resolved = URL(string: nextLine, relativeTo: baseURL) {
+                            let absolute = resolved.absoluteURL
+                            if absolute.scheme != Self.scheme {
+                                let resolvedComponents = URLComponents(url: absolute, resolvingAgainstBaseURL: false)!
+                                let existingParamNames = Set((resolvedComponents.queryItems ?? []).compactMap(\.name))
+                                let newParams = originalQueryItems.filter { !existingParamNames.contains($0.name) }
+                                var mergedComponents = resolvedComponents
+                                if !newParams.isEmpty {
+                                    mergedComponents.queryItems = (resolvedComponents.queryItems ?? []) + newParams
+                                }
+                                if let rewritten = mergedComponents.url {
+                                    logger.info("Variant playlist URL: \(nextLine) → \(rewritten.absoluteString)")
+                                    lines[nextIndex] = rewritten.absoluteString
+                                }
+                            } else {
+                                logger.warning("Variant URL already has scheme \(Self.scheme): \(nextLine)")
                             }
                         } else {
                             logger.warning("Failed to resolve variant URL: \(nextLine)")
