@@ -269,6 +269,11 @@ extension HLSManifestInterceptor: AVAssetResourceLoaderDelegate {
                 continue
             }
 
+            // Diagnostic: log all non-tag, non-empty lines (potential URLs)
+            if inMaster && !line.isEmpty && !line.hasPrefix("#") {
+                logger.info("Master manifest URL line[\(i)]: \(line.prefix(200))")
+            }
+
             // Rewrite #EXT-X-MEDIA subtitle playlist URIs → custom scheme
             if line.hasPrefix("#EXT-X-MEDIA:") && line.contains("URI=\"") {
                 lines[i] = rewriteURIAttribute(
@@ -294,20 +299,16 @@ extension HLSManifestInterceptor: AVAssetResourceLoaderDelegate {
             }
 
             // Rewrite variant playlist URL (line after #EXT-X-STREAM-INF) → absolute HTTP
-            // This is critical: if left as relative, AVPlayer resolves against
-            // the custom scheme base URL, routing ALL segment requests through
-            // the interceptor proxy, which adds latency and breaks streaming.
             if line.hasPrefix("#EXT-X-STREAM-INF:") {
                 let nextIndex = lines.index(after: i)
                 if nextIndex < lines.endIndex {
                     let nextLine = lines[nextIndex].trimmingCharacters(in: .whitespaces)
+                    logger.info("Found #EXT-X-STREAM-INF, next line[\(nextIndex)]: \(nextLine.prefix(200))")
                     if !nextLine.hasPrefix("#") && !nextLine.isEmpty {
-                        // Resolve relative URL to absolute HTTP (not custom scheme)
                         if let resolved = URL(string: nextLine, relativeTo: baseURL),
                            let absolute = try? resolved.absoluteURL,
                            absolute.scheme != Self.scheme
                         {
-                            // Preserve original query params
                             let resolvedComponents = URLComponents(url: absolute, resolvingAgainstBaseURL: false)!
                             let existingParamNames = Set((resolvedComponents.queryItems ?? []).compactMap(\.name))
                             let newParams = originalQueryItems.filter { !existingParamNames.contains($0.name) }
@@ -319,6 +320,8 @@ extension HLSManifestInterceptor: AVAssetResourceLoaderDelegate {
                                 logger.info("Variant playlist URL: \(nextLine) → \(rewritten.absoluteString)")
                                 lines[nextIndex] = rewritten.absoluteString
                             }
+                        } else {
+                            logger.warning("Failed to resolve variant URL: \(nextLine)")
                         }
                     }
                 }
