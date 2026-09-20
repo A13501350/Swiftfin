@@ -53,6 +53,19 @@ final class HLSManifestInterceptor: NSObject, Sendable {
     }
 }
 
+// MARK: - M3U8Decoder types
+
+extension HLSManifestInterceptor {
+
+    /// Decodable representation of an HLS master playlist.
+    struct MasterPlaylist: Decodable {
+        let extm3u: Bool
+        let ext_x_media: [EXT_X_MEDIA]
+        let ext_x_i_frame_stream_inf: [EXT_X_I_FRAME_STREAM_INF]
+        let streams: [VariantStream]
+    }
+}
+
 extension HLSManifestInterceptor: AVAssetResourceLoaderDelegate {
 
     func resourceLoader(
@@ -223,13 +236,6 @@ extension HLSManifestInterceptor: AVAssetResourceLoaderDelegate {
     /// - Subtitle/trickplay URIs → custom scheme (for X-TIMESTAMP-MAP fixing)
     /// - Variant playlist URLs → absolute HTTP (for direct AVPlayer fetching)
     private func rewriteMasterManifest(_ content: String) -> String {
-        struct MasterPlaylist: Decodable {
-            let extm3u: Bool
-            let ext_x_media: [EXT_X_MEDIA]
-            let ext_x_i_frame_stream_inf: [EXT_X_I_FRAME_STREAM_INF]
-            let streams: [VariantStream]
-        }
-
         do {
             let decoder = M3U8Decoder()
             let playlist = try decoder.decode(MasterPlaylist.self, from: content)
