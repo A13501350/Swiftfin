@@ -508,6 +508,7 @@
 				E12CDBC02FFB593800828742 /* CollectionVGrid */,
 				E144DBFB30464F3A009B85B5 /* SwiftVLC */,
 				E16C08F8305A386900895062 /* CollectionHStack */,
+				E1A1B5C42F00000000000012 /* M3U8Decoder */,
 			);
 			productName = "JellyfinPlayer tvOS";
 			productReference = 535870602669D21600D05A09 /* Swiftfin tvOS.app */;
@@ -588,6 +589,7 @@
 				E144DBF830464F3A009B85B5 /* SwiftVLC */,
 				E16C08F3305A350C00895062 /* CollectionHStack */,
 				E16C08F6305A385900895062 /* CollectionHStack */,
+				E1A1B5C42F00000000000011 /* M3U8Decoder */,
 			);
 			productName = JellyfinPlayer;
 			productReference = 5377CBF1263B596A003A4E83 /* Swiftfin iOS.app */;
@@ -703,6 +705,7 @@
 				E12CDBBD2FFB592A00828742 /* XCRemoteSwiftPackageReference "CollectionVGrid" */,
 				E144DBF730464F3A009B85B5 /* XCRemoteSwiftPackageReference "SwiftVLC" */,
 				E16C08F5305A385900895062 /* XCRemoteSwiftPackageReference "CollectionHStack" */,
+				E1A1B5C42F00000000000010 /* XCRemoteSwiftPackageReference "M3U8Decoder" */,
 			);
 			productRefGroup = 5377CBF2263B596A003A4E83 /* Products */;
 			projectDirPath = "";
@@ -1387,6 +1390,14 @@
 				minimumVersion = 5.0.0;
 			};
 		};
+		E1A1B5C42F00000000000010 /* XCRemoteSwiftPackageReference "M3U8Decoder" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/ikhvorost/M3U8Decoder.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 4.0.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -1774,6 +1785,16 @@
 		E1FADDF02E84B63600FB310E /* StatefulMacros */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = StatefulMacros;
+		};
+		E1A1B5C42F00000000000011 /* M3U8Decoder */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = E1A1B5C42F00000000000010 /* XCRemoteSwiftPackageReference "M3U8Decoder" */;
+			productName = M3U8Decoder;
+		};
+		E1A1B5C42F00000000000012 /* M3U8Decoder */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = E1A1B5C42F00000000000010 /* XCRemoteSwiftPackageReference "M3U8Decoder" */;
+			productName = M3U8Decoder;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

@@ -10,6 +10,7 @@ import AVFoundation
 import Foundation
 import JellyfinAPI
 import Logging
+import M3U8Decoder
 
 /// Intercepts HLS manifest requests via `AVAssetResourceLoaderDelegate`
 /// to fix the `X-TIMESTAMP-MAP` line before AVPlayer parses the manifest.
@@ -90,7 +91,6 @@ extension HLSManifestInterceptor: AVAssetResourceLoaderDelegate {
         let requestURL = request.request.url ?? URL(string: "nil")!
         let path = requestURL.path.lowercased()
 
-        // Only intercept .m3u8 manifest files — proxy everything else directly
         if path.hasSuffix(".m3u8") {
             do {
                 let originalURL = self.originalURL(for: requestURL)
@@ -110,12 +110,10 @@ extension HLSManifestInterceptor: AVAssetResourceLoaderDelegate {
                 request.finishLoading(with: error)
             }
         } else {
-            // Proxy non-manifest requests (.mp4, etc.) directly
             await proxyRequest(request)
         }
     }
 
-    /// Proxies a non-manifest request directly to the server.
     private func proxyRequest(_ request: AVAssetResourceLoadingRequest) async {
         let requestURL = request.request.url ?? URL(string: "nil")!
         let originalURL = self.originalURL(for: requestURL)
@@ -124,7 +122,6 @@ extension HLSManifestInterceptor: AVAssetResourceLoaderDelegate {
             var urlRequest = URLRequest(url: originalURL)
             urlRequest.httpMethod = request.request.httpMethod ?? "GET"
 
-            // Forward headers from the original request
             if let allHeaders = request.request.allHTTPHeaderFields {
                 for (key, value) in allHeaders {
                     urlRequest.setValue(value, forHTTPHeaderField: key)
@@ -144,7 +141,6 @@ extension HLSManifestInterceptor: AVAssetResourceLoaderDelegate {
             }
 
             if let infoRequest = request.contentInformationRequest {
-                // Set content type based on file extension
                 if originalURL.path.hasSuffix(".mp4") || originalURL.path.hasSuffix(".cmfv") || originalURL.path.hasSuffix(".cmfa") {
                     infoRequest.contentType = "public.mpeg-4"
                 } else if originalURL.path.hasSuffix(".m4s") {
@@ -164,7 +160,6 @@ extension HLSManifestInterceptor: AVAssetResourceLoaderDelegate {
         }
     }
 
-    /// Reconstructs the original URL from a custom-scheme request URL.
     private func originalURL(for requestURL: URL) -> URL {
         guard requestURL.scheme == Self.scheme else { return requestURL }
         var components = URLComponents(url: requestURL, resolvingAgainstBaseURL: false)!
@@ -201,14 +196,10 @@ extension HLSManifestInterceptor: AVAssetResourceLoaderDelegate {
 
         logger.info("Fetched \(data.count) bytes from server")
 
-        // Fix X-TIMESTAMP-MAP line in all playlist types
         content = fixTimestampMap(content)
 
-        // Only rewrite URLs in master manifests (which contain #EXT-X-STREAM-INF).
-        // Variant/subtitle playlists contain #EXT-X-MAP with binary init segments
-        // (.mp4) that must NOT be intercepted.
         if content.contains("#EXT-X-STREAM-INF") {
-            content = rewriteVariantURLs(content)
+            content = rewriteMasterManifest(content)
         }
 
         let preview = String(content.prefix(500))
@@ -217,10 +208,6 @@ extension HLSManifestInterceptor: AVAssetResourceLoaderDelegate {
         return Data(content.utf8)
     }
 
-    /// Fixes the `X-TIMESTAMP-MAP` line by setting MPEGTS to 0.
-    ///
-    /// Before (broken): `X-TIMESTAMP-MAP=LOCAL:0x0000,MPEGTS:900000`
-    /// After (fixed):   `X-TIMESTAMP-MAP=LOCAL:0x0000,MPEGTS:0`
     private func fixTimestampMap(_ content: String) -> String {
         content.replacing(Self.timestampMapPattern) { match in
             if match.output.contains("MPEGTS:0") {
@@ -232,15 +219,28 @@ extension HLSManifestInterceptor: AVAssetResourceLoaderDelegate {
         }
     }
 
-    /// Rewrites URLs in master manifest:
+    /// Uses M3U8Decoder to parse the master manifest, then rewrites URLs:
     /// - Subtitle/trickplay URIs → custom scheme (for X-TIMESTAMP-MAP fixing)
-    /// - Variant playlist URLs → absolute HTTP (so AVPlayer fetches directly,
-    ///   not through this interceptor, avoiding proxy overhead on .mp4 segments)
-    private func rewriteVariantURLs(_ content: String) -> String {
-        var lines = content.components(separatedBy: .newlines)
-        var inMaster = false
+    /// - Variant playlist URLs → absolute HTTP (for direct AVPlayer fetching)
+    private func rewriteMasterManifest(_ content: String) -> String {
+        struct MasterPlaylist: Decodable {
+            let extm3u: Bool
+            let ext_x_media: [EXT_X_MEDIA]
+            let ext_x_i_frame_stream_inf: [EXT_X_I_FRAME_STREAM_INF]
+            let streams: [VariantStream]
+        }
 
-        // Compute base directory for resolving relative URLs
+        do {
+            let decoder = M3U8Decoder()
+            let playlist = try decoder.decode(MasterPlaylist.self, from: content)
+            return rewriteMasterManifestContent(content, playlist: playlist)
+        } catch {
+            logger.warning("M3U8Decoder failed: \(error.localizedDescription), falling back to line-based parsing")
+            return rewriteMasterManifestFallback(content)
+        }
+    }
+
+    private func rewriteMasterManifestContent(_ content: String, playlist: MasterPlaylist) -> String {
         let originalComponents = URLComponents(url: originalURL, resolvingAgainstBaseURL: false)!
         var basePath = (originalComponents.path as NSString).deletingLastPathComponent
         if !basePath.hasSuffix("/") {
@@ -250,31 +250,16 @@ extension HLSManifestInterceptor: AVAssetResourceLoaderDelegate {
         baseURLComponents.path = basePath
         baseURLComponents.query = nil
         let baseURL = baseURLComponents.url!
+        let originalQueryItems = originalComponents.queryItems ?? []
 
         logger.info("Base URL for relative resolution: \(baseURL.absoluteString)")
 
-        // Query parameters from the original master manifest URL to preserve
-        let originalQueryItems = originalComponents.queryItems ?? []
-
+        var lines = content.components(separatedBy: .newlines)
         var i = lines.startIndex
+
         while i < lines.endIndex {
             let line = lines[i].trimmingCharacters(in: .whitespaces)
 
-            if line.hasPrefix("#EXTM3U") {
-                inMaster = true
-            }
-
-            guard inMaster else {
-                i = lines.index(after: i)
-                continue
-            }
-
-            // Diagnostic: log all non-tag, non-empty lines (potential URLs)
-            if inMaster && !line.isEmpty && !line.hasPrefix("#") {
-                logger.info("Master manifest URL line[\(i)]: \(line.prefix(200))")
-            }
-
-            // Rewrite #EXT-X-MEDIA subtitle playlist URIs → custom scheme
             if line.hasPrefix("#EXT-X-MEDIA:") && line.contains("URI=\"") {
                 lines[i] = rewriteURIAttribute(
                     in: line,
@@ -286,7 +271,6 @@ extension HLSManifestInterceptor: AVAssetResourceLoaderDelegate {
                 continue
             }
 
-            // Rewrite #EXT-X-IMAGE-STREAM-INF trickplay URI → custom scheme
             if line.hasPrefix("#EXT-X-IMAGE-STREAM-INF:") && line.contains("URI=\"") {
                 lines[i] = rewriteURIAttribute(
                     in: line,
@@ -298,8 +282,6 @@ extension HLSManifestInterceptor: AVAssetResourceLoaderDelegate {
                 continue
             }
 
-            // Rewrite variant playlist URL (line after #EXT-X-STREAM-INF) → absolute HTTP
-            // Skip blank lines between STREAM-INF and URL (Jellyfin adds them)
             if line.hasPrefix("#EXT-X-STREAM-INF:") {
                 var searchIndex = lines.index(after: i)
                 while searchIndex < lines.endIndex {
@@ -340,10 +322,88 @@ extension HLSManifestInterceptor: AVAssetResourceLoaderDelegate {
             i = lines.index(after: i)
         }
 
+        logger.info("Parsed master manifest: \(playlist.ext_x_media.count) media, \(playlist.streams.count) streams, \(playlist.ext_x_i_frame_stream_inf.count) iframe streams")
+
         return lines.joined(separator: "\n")
     }
 
-    /// Rewrites URI="..." attribute value to use the specified scheme.
+    /// Fallback: line-based parsing when M3U8Decoder fails
+    private func rewriteMasterManifestFallback(_ content: String) -> String {
+        let originalComponents = URLComponents(url: originalURL, resolvingAgainstBaseURL: false)!
+        var basePath = (originalComponents.path as NSString).deletingLastPathComponent
+        if !basePath.hasSuffix("/") {
+            basePath.append("/")
+        }
+        var baseURLComponents = originalComponents
+        baseURLComponents.path = basePath
+        baseURLComponents.query = nil
+        let baseURL = baseURLComponents.url!
+        let originalQueryItems = originalComponents.queryItems ?? []
+
+        var lines = content.components(separatedBy: .newlines)
+        var i = lines.startIndex
+        while i < lines.endIndex {
+            let line = lines[i].trimmingCharacters(in: .whitespaces)
+
+            if line.hasPrefix("#EXT-X-MEDIA:") && line.contains("URI=\"") {
+                lines[i] = rewriteURIAttribute(
+                    in: line,
+                    baseURL: baseURL,
+                    appendQueryItems: originalQueryItems,
+                    targetScheme: Self.scheme
+                )
+                i = lines.index(after: i)
+                continue
+            }
+
+            if line.hasPrefix("#EXT-X-IMAGE-STREAM-INF:") && line.contains("URI=\"") {
+                lines[i] = rewriteURIAttribute(
+                    in: line,
+                    baseURL: baseURL,
+                    appendQueryItems: originalQueryItems,
+                    targetScheme: Self.scheme
+                )
+                i = lines.index(after: i)
+                continue
+            }
+
+            if line.hasPrefix("#EXT-X-STREAM-INF:") {
+                var searchIndex = lines.index(after: i)
+                while searchIndex < lines.endIndex {
+                    let nextLine = lines[searchIndex].trimmingCharacters(in: .whitespaces)
+                    if nextLine.isEmpty {
+                        searchIndex = lines.index(after: searchIndex)
+                        continue
+                    }
+                    if !nextLine.hasPrefix("#") {
+                        if let resolved = URL(string: nextLine, relativeTo: baseURL) {
+                            let absolute = resolved.absoluteURL
+                            if absolute.scheme != Self.scheme {
+                                let resolvedComponents = URLComponents(url: absolute, resolvingAgainstBaseURL: false)!
+                                let existingParamNames = Set((resolvedComponents.queryItems ?? []).compactMap(\.name))
+                                let newParams = originalQueryItems.filter { !existingParamNames.contains($0.name) }
+                                var mergedComponents = resolvedComponents
+                                if !newParams.isEmpty {
+                                    mergedComponents.queryItems = (resolvedComponents.queryItems ?? []) + newParams
+                                }
+                                if let rewritten = mergedComponents.url {
+                                    lines[searchIndex] = rewritten.absoluteString
+                                }
+                            }
+                        }
+                    }
+                    break
+                }
+                i = lines.index(after: i)
+                continue
+            }
+
+            i = lines.index(after: i)
+        }
+
+        return lines.joined(separator: "\n")
+    }
+
     private func rewriteURIAttribute(
         in line: String,
         baseURL: URL,
@@ -358,7 +418,6 @@ extension HLSManifestInterceptor: AVAssetResourceLoaderDelegate {
         guard let resolved = URL(string: uriValue, relativeTo: baseURL) else { return line }
         let absolute = resolved.absoluteURL
 
-        // Merge query parameters: only append those not already present
         let resolvedComponents = URLComponents(url: absolute, resolvingAgainstBaseURL: false)!
         let existingParamNames = Set((resolvedComponents.queryItems ?? []).compactMap(\.name))
         let newParams = appendQueryItems.filter { !existingParamNames.contains($0.name) }
