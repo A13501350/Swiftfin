@@ -299,12 +299,17 @@ extension HLSManifestInterceptor: AVAssetResourceLoaderDelegate {
             }
 
             // Rewrite variant playlist URL (line after #EXT-X-STREAM-INF) → absolute HTTP
+            // Skip blank lines between STREAM-INF and URL (Jellyfin adds them)
             if line.hasPrefix("#EXT-X-STREAM-INF:") {
-                let nextIndex = lines.index(after: i)
-                if nextIndex < lines.endIndex {
-                    let nextLine = lines[nextIndex].trimmingCharacters(in: .whitespaces)
-                    logger.info("Found #EXT-X-STREAM-INF, next line[\(nextIndex)]: \(nextLine.prefix(200))")
-                    if !nextLine.hasPrefix("#") && !nextLine.isEmpty {
+                var searchIndex = lines.index(after: i)
+                while searchIndex < lines.endIndex {
+                    let nextLine = lines[searchIndex].trimmingCharacters(in: .whitespaces)
+                    if nextLine.isEmpty {
+                        searchIndex = lines.index(after: searchIndex)
+                        continue
+                    }
+                    logger.info("Found #EXT-X-STREAM-INF, next non-empty line[\(searchIndex)]: \(nextLine.prefix(200))")
+                    if !nextLine.hasPrefix("#") {
                         if let resolved = URL(string: nextLine, relativeTo: baseURL) {
                             let absolute = resolved.absoluteURL
                             if absolute.scheme != Self.scheme {
@@ -317,15 +322,16 @@ extension HLSManifestInterceptor: AVAssetResourceLoaderDelegate {
                                 }
                                 if let rewritten = mergedComponents.url {
                                     logger.info("Variant playlist URL: \(nextLine) → \(rewritten.absoluteString)")
-                                    lines[nextIndex] = rewritten.absoluteString
+                                    lines[searchIndex] = rewritten.absoluteString
                                 }
                             } else {
-                                logger.warning("Variant URL already has scheme \(Self.scheme): \(nextLine)")
+                                logger.warning("Variant URL already has scheme \(Self.scheme)")
                             }
                         } else {
                             logger.warning("Failed to resolve variant URL: \(nextLine)")
                         }
                     }
+                    break
                 }
                 i = lines.index(after: i)
                 continue
