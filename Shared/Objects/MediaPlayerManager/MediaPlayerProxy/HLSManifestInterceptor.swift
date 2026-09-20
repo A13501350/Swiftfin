@@ -232,22 +232,17 @@ extension HLSManifestInterceptor: AVAssetResourceLoaderDelegate {
         }
     }
 
-    /// Rewrites variant and subtitle playlist URLs in master manifest to use custom scheme.
-    ///
-    /// This ensures AVPlayer routes sub-playlist requests through this delegate,
-    /// allowing us to fix `X-TIMESTAMP-MAP` in all sub-playlists.
-    /// Segment URLs are left unchanged (they point directly to the server).
+    /// Rewrites URLs in master manifest:
+    /// - Subtitle/trickplay URIs → custom scheme (for X-TIMESTAMP-MAP fixing)
+    /// - Variant playlist URLs → absolute HTTP (so AVPlayer fetches directly,
+    ///   not through this interceptor, avoiding proxy overhead on .mp4 segments)
     private func rewriteVariantURLs(_ content: String) -> String {
         var lines = content.components(separatedBy: .newlines)
         var inMaster = false
 
         // Compute base directory for resolving relative URLs
-        // e.g. https://server/Videos/xxx/master.m3u8?... → https://server/Videos/xxx/
         let originalComponents = URLComponents(url: originalURL, resolvingAgainstBaseURL: false)!
         var basePath = (originalComponents.path as NSString).deletingLastPathComponent
-        // Ensure trailing slash so relative URLs resolve correctly
-        // e.g. "main.m3u8" relative to "/videos/UUID/" → "/videos/UUID/main.m3u8"
-        //      NOT "/videos/main.m3u8" (which happens without trailing slash)
         if !basePath.hasSuffix("/") {
             basePath.append("/")
         }
@@ -257,50 +252,92 @@ extension HLSManifestInterceptor: AVAssetResourceLoaderDelegate {
         let baseURL = baseURLComponents.url!
 
         logger.info("Base URL for relative resolution: \(baseURL.absoluteString)")
-        logger.info("Original URL path: \(originalComponents.path)")
-        logger.info("Base path after deletingLastPathComponent: \(basePath)")
 
         // Query parameters from the original master manifest URL to preserve
         let originalQueryItems = originalComponents.queryItems ?? []
 
-        for i in lines.indices {
+        var i = lines.startIndex
+        while i < lines.endIndex {
             let line = lines[i].trimmingCharacters(in: .whitespaces)
 
             if line.hasPrefix("#EXTM3U") {
                 inMaster = true
             }
 
-            guard inMaster else { continue }
+            guard inMaster else {
+                i = lines.index(after: i)
+                continue
+            }
 
-            // Rewrite #EXT-X-MEDIA subtitle playlist URIs
+            // Rewrite #EXT-X-MEDIA subtitle playlist URIs → custom scheme
             if line.hasPrefix("#EXT-X-MEDIA:") && line.contains("URI=\"") {
                 lines[i] = rewriteURIAttribute(
                     in: line,
                     baseURL: baseURL,
-                    appendQueryItems: originalQueryItems
+                    appendQueryItems: originalQueryItems,
+                    targetScheme: Self.scheme
                 )
+                i = lines.index(after: i)
                 continue
             }
 
-            // Rewrite #EXT-X-IMAGE-STREAM-INF trickplay URI
+            // Rewrite #EXT-X-IMAGE-STREAM-INF trickplay URI → custom scheme
             if line.hasPrefix("#EXT-X-IMAGE-STREAM-INF:") && line.contains("URI=\"") {
                 lines[i] = rewriteURIAttribute(
                     in: line,
                     baseURL: baseURL,
-                    appendQueryItems: originalQueryItems
+                    appendQueryItems: originalQueryItems,
+                    targetScheme: Self.scheme
                 )
+                i = lines.index(after: i)
                 continue
             }
+
+            // Rewrite variant playlist URL (line after #EXT-X-STREAM-INF) → absolute HTTP
+            // This is critical: if left as relative, AVPlayer resolves against
+            // the custom scheme base URL, routing ALL segment requests through
+            // the interceptor proxy, which adds latency and breaks streaming.
+            if line.hasPrefix("#EXT-X-STREAM-INF:") {
+                let nextIndex = lines.index(after: i)
+                if nextIndex < lines.endIndex {
+                    let nextLine = lines[nextIndex].trimmingCharacters(in: .whitespaces)
+                    if !nextLine.hasPrefix("#") && !nextLine.isEmpty {
+                        // Resolve relative URL to absolute HTTP (not custom scheme)
+                        if let resolved = URL(string: nextLine, relativeTo: baseURL),
+                           let absolute = try? resolved.absoluteURL,
+                           absolute.scheme != Self.scheme
+                        {
+                            // Preserve original query params
+                            let resolvedComponents = URLComponents(url: absolute, resolvingAgainstBaseURL: false)!
+                            let existingParamNames = Set((resolvedComponents.queryItems ?? []).compactMap(\.name))
+                            let newParams = originalQueryItems.filter { !existingParamNames.contains($0.name) }
+                            var mergedComponents = resolvedComponents
+                            if !newParams.isEmpty {
+                                mergedComponents.queryItems = (resolvedComponents.queryItems ?? []) + newParams
+                            }
+                            if let rewritten = mergedComponents.url {
+                                logger.info("Variant playlist URL: \(nextLine) → \(rewritten.absoluteString)")
+                                lines[nextIndex] = rewritten.absoluteString
+                            }
+                        }
+                    }
+                }
+                i = lines.index(after: i)
+                continue
+            }
+
+            i = lines.index(after: i)
         }
 
         return lines.joined(separator: "\n")
     }
 
-    /// Rewrites URI="..." attribute value to use custom scheme.
+    /// Rewrites URI="..." attribute value to use the specified scheme.
     private func rewriteURIAttribute(
         in line: String,
         baseURL: URL,
-        appendQueryItems: [URLQueryItem]
+        appendQueryItems: [URLQueryItem],
+        targetScheme: String
     ) -> String {
         guard let uriRange = line.range(of: "URI=\"") else { return line }
         let afterURI = line[uriRange.upperBound...]
@@ -309,7 +346,6 @@ extension HLSManifestInterceptor: AVAssetResourceLoaderDelegate {
         let uriValue = String(afterURI[afterURI.startIndex..<endQuote])
         guard let resolved = URL(string: uriValue, relativeTo: baseURL) else { return line }
         let absolute = resolved.absoluteURL
-        guard absolute.scheme != Self.scheme else { return line }
 
         // Merge query parameters: only append those not already present
         let resolvedComponents = URLComponents(url: absolute, resolvingAgainstBaseURL: false)!
@@ -319,7 +355,7 @@ extension HLSManifestInterceptor: AVAssetResourceLoaderDelegate {
         if !newParams.isEmpty {
             mergedComponents.queryItems = (resolvedComponents.queryItems ?? []) + newParams
         }
-        mergedComponents.scheme = Self.scheme
+        mergedComponents.scheme = targetScheme
         guard let rewritten = mergedComponents.url else { return line }
 
         return String(line[line.startIndex..<uriRange.lowerBound])

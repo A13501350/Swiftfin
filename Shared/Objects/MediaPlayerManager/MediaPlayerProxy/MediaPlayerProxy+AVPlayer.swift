@@ -10,6 +10,7 @@ import AVFoundation
 import Combine
 import Defaults
 import Foundation
+import Logging
 @preconcurrency import JellyfinAPI
 import SwiftUI
 
@@ -33,9 +34,11 @@ class AVMediaPlayerProxy: VideoMediaPlayerProxy {
     let avPlayerLayer: AVPlayerLayer
     let player: AVPlayer
 
-//    private var rateObserver: NSKeyValueObservation!
+    private let logger = Logger.swiftfin()
+    private var rateObserver: NSKeyValueObservation!
     private var statusObserver: NSKeyValueObservation!
     private var timeControlStatusObserver: NSKeyValueObservation!
+    private var currentItemObserver: NSKeyValueObservation!
     private var timeObserver: Any!
     private var managerItemObserver: AnyCancellable?
     private var managerStateObserver: AnyCancellable?
@@ -139,6 +142,7 @@ class AVMediaPlayerProxy: VideoMediaPlayerProxy {
 extension AVMediaPlayerProxy {
 
     private func playbackStopped() {
+        logger.info("playbackStopped")
         player.pause()
 
         if let timeObserver {
@@ -146,6 +150,11 @@ extension AVMediaPlayerProxy {
                 self.player.removeTimeObserver(timeObserver)
                 self.timeObserver = nil
             }
+        }
+
+        if let rateObserver {
+            rateObserver.invalidate()
+            self.rateObserver = nil
         }
 
         if let statusObserver {
@@ -158,11 +167,20 @@ extension AVMediaPlayerProxy {
             self.timeControlStatusObserver = nil
         }
 
+        if let currentItemObserver {
+            currentItemObserver.invalidate()
+            self.currentItemObserver = nil
+        }
+
         manifestInterceptor = nil
     }
 
     private func playNew(item: MediaPlayerItem) {
         let baseItem = item.baseItem
+
+        logger.info("playNew: url=\(item.url.absoluteString)")
+        logger.info("playNew: transcodeURL=\(item.mediaSource.transcodingURL?.absoluteString ?? "nil")")
+        logger.info("playNew: mediaType=\(item.mediaSource.mediaStream?.type?.rawValue ?? "nil")")
 
         // Use HLS manifest interceptor for transcoded streams to fix X-TIMESTAMP-MAP
         let newAVPlayerItem: AVPlayerItem
@@ -173,49 +191,67 @@ extension AVMediaPlayerProxy {
             manifestInterceptor = interceptor
             let asset = interceptor.makeAsset()
             newAVPlayerItem = AVPlayerItem(asset: asset)
+            logger.info("playNew: using HLSManifestInterceptor with custom scheme")
         } else {
             manifestInterceptor = nil
             newAVPlayerItem = AVPlayerItem(url: item.url)
+            logger.info("playNew: direct AVPlayerItem (no interception)")
         }
         newAVPlayerItem.externalMetadata = item.baseItem.avMetadata
 
         player.replaceCurrentItem(with: newAVPlayerItem)
+        logger.info("playNew: player.replaceCurrentItem done, status=\(newAVPlayerItem.status.rawValue)")
 
-        // TODO: protect against paused
-//        rateObserver = player.observe(\.rate, options: [.new, .initial]) { _, value in
-//            DispatchQueue.main.async {
-//                self.manager?.set(rate: value.newValue ?? 1.0)
-//            }
-//        }
+        // Observe rate changes
+        rateObserver = player.observe(\.rate, options: [.new, .initial]) { [logger] player, _ in
+            logger.info("AVPlayer rate changed: \(player.rate)")
+        }
 
-        timeControlStatusObserver = player.observe(\.timeControlStatus, options: [.new, .initial]) { player, _ in
-            let timeControlStatus = player.timeControlStatus
-
-            DispatchQueue.main.async {
-                switch timeControlStatus {
-                case .paused:
+        // Observe timeControlStatus
+        timeControlStatusObserver = player.observe(\.timeControlStatus, options: [.new, .initial]) { [logger] player, _ in
+            let status = player.timeControlStatus
+            switch status {
+            case .paused:
+                logger.info("AVPlayer timeControlStatus: paused")
+                DispatchQueue.main.async {
                     self.manager?.setPlaybackRequestStatus(status: .paused)
-                case .waitingToPlayAtSpecifiedRate: ()
-                // TODO: buffering
-                case .playing:
-                    self.manager?.setPlaybackRequestStatus(status: .playing)
-                @unknown default: ()
                 }
+            case .waitingToPlayAtSpecifiedRate:
+                logger.info("AVPlayer timeControlStatus: waitingToPlayAtSpecifiedRate")
+            case .playing:
+                logger.info("AVPlayer timeControlStatus: playing")
+                DispatchQueue.main.async {
+                    self.manager?.setPlaybackRequestStatus(status: .playing)
+                }
+            @unknown default:
+                logger.info("AVPlayer timeControlStatus: unknown(\(status.rawValue))")
             }
         }
 
-        // TODO: proper handling of none/unknown states
-        statusObserver = player.observe(\.currentItem?.status, options: [.new, .initial]) { _, value in
+        // Observe currentItem status
+        statusObserver = player.observe(\.currentItem?.status, options: [.new, .initial]) { [logger] _, value in
             guard let newValue = value.newValue else { return }
             switch newValue {
             case .failed:
+                logger.error("AVPlayer currentItem.status: FAILED")
                 if let error = self.player.error {
+                    logger.error("AVPlayer error: \(error.localizedDescription)")
+                    if let nsError = error as NSError? {
+                        logger.error("AVPlayer error domain=\(nsError.domain) code=\(nsError.code) userInfo=\(nsError.userInfo)")
+                    }
                     DispatchQueue.main.async {
                         self.manager?.error(ErrorMessage("AVPlayer error: \(error.localizedDescription)"))
                     }
                 }
-            case .none, .readyToPlay, .unknown:
+                if let itemError = self.player.currentItem?.error {
+                    logger.error("AVPlayer currentItem.error: \(itemError.localizedDescription)")
+                }
+            case .none:
+                logger.info("AVPlayer currentItem.status: none")
+            case .readyToPlay:
+                logger.info("AVPlayer currentItem.status: readyToPlay")
                 let startSeconds = max(.zero, (baseItem.startSeconds ?? .zero) - Duration.seconds(Defaults[.VideoPlayer.resumeOffset]))
+                logger.info("playNew: seeking to \(startSeconds.components.seconds)s")
 
                 self.player.seek(
                     to: CMTimeMake(
@@ -224,12 +260,48 @@ extension AVMediaPlayerProxy {
                     ),
                     toleranceBefore: .zero,
                     toleranceAfter: .zero,
-                    completionHandler: { _ in
+                    completionHandler: { [logger] _ in
+                        logger.info("playNew: seek completed, playing")
                         self.play()
                     }
                 )
-            @unknown default: ()
+            case .unknown:
+                logger.info("AVPlayer currentItem.status: unknown")
+            @unknown default:
+                logger.info("AVPlayer currentItem.status: unknown(\(newValue.rawValue))")
             }
+        }
+
+        // Observe currentItem changes
+        currentItemObserver = player.observe(\.currentItem, options: [.new]) { [logger] _, value in
+            if let item = value.newValue as? AVPlayerItem {
+                logger.info("AVPlayer currentItem changed: status=\(item.status.rawValue) duration=\(item.duration.seconds)s")
+                if let tracks = item.tracks as? [AVPlayerItemTrack] {
+                    logger.info("AVPlayer tracks: \(tracks.count)")
+                    for (idx, track) in tracks.enumerated() {
+                        logger.info("  track[\(idx)]: enabled=\(track.isEnabled) mediaType=\(track.assetTrack?.mediaType.rawValue ?? "nil")")
+                    }
+                }
+            } else {
+                logger.info("AVPlayer currentItem changed: nil")
+            }
+        }
+
+        // Observe playbackBufferFull and playbackBufferEmpty
+        NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemPlaybackStalled,
+            object: newAVPlayerItem,
+            queue: .main
+        ) { [logger] _ in
+            logger.warning("AVPlayerItemPlaybackStalled notification")
+        }
+
+        NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime,
+            object: newAVPlayerItem,
+            queue: .main
+        ) { [logger] _ in
+            logger.info("AVPlayerItemDidPlayToEndTime notification")
         }
     }
 }
