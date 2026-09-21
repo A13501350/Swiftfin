@@ -40,6 +40,10 @@ class AVMediaPlayerProxy: VideoMediaPlayerProxy {
     private var managerItemObserver: AnyCancellable?
     private var managerStateObserver: AnyCancellable?
 
+    /// Retained for the lifetime of the asset so the resource loader delegate is not deallocated
+    /// mid-playback. See `HLSWebVTTTimestampMapFixer`.
+    private var hlsTimestampFixer: HLSWebVTTTimestampMapFixer?
+
     weak var manager: MediaPlayerManager? {
         didSet {
             for var o in observers {
@@ -161,7 +165,22 @@ extension AVMediaPlayerProxy {
     private func playNew(item: MediaPlayerItem) {
         let baseItem = item.baseItem
 
-        let newAVPlayerItem = AVPlayerItem(url: item.url)
+        // Workaround for Jellyfin server issue #16647 (fixed in server v13.0): when HLS subtitles
+        // are delivered over fMP4 segments the server hardcodes a 10s `X-TIMESTAMP-MAP` offset that
+        // AVPlayer applies, delaying subtitles. Route HLS loading through a resource-loader delegate
+        // that rewrites the offset for `.vtt` segments. See `HLSWebVTTTimestampMapFixer`.
+        let asset: AVAsset
+        if let interceptURL = item.url.hlsInterceptURL, item.url.absoluteString.contains("m3u8") {
+            let urlAsset = AVURLAsset(url: interceptURL)
+            let fixer = HLSWebVTTTimestampMapFixer()
+            urlAsset.resourceLoader.setDelegate(fixer, queue: DispatchQueue(label: "com.swiftfin.hls.subtitlefix"))
+            self.hlsTimestampFixer = fixer
+            asset = urlAsset
+        } else {
+            asset = AVURLAsset(url: item.url)
+        }
+
+        let newAVPlayerItem = AVPlayerItem(asset: asset)
         newAVPlayerItem.externalMetadata = item.baseItem.avMetadata
 
         player.replaceCurrentItem(with: newAVPlayerItem)
