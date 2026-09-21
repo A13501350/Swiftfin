@@ -10,14 +10,19 @@ import AVFoundation
 import Foundation
 import JellyfinAPI
 import Logging
-import M3U8Decoder
 
 /// Intercepts HLS manifest requests via `AVAssetResourceLoaderDelegate`
-/// to fix the `X-TIMESTAMP-MAP` line before AVPlayer parses the manifest.
+/// to route subtitle/trickplay requests through a custom scheme, enabling
+/// `X-TIMESTAMP-MAP` fix in VTT responses.
 ///
 /// The Jellyfin server hardcodes `MPEGTS:900000` in `X-TIMESTAMP-MAP`
-/// for transmuxed streams (e.g., MKV → HLS), which is incorrect for
-/// fMP4 segments (should be 0). This causes subtitle timing offset.
+/// for VTT subtitle files from transmuxed streams (e.g., MKV → HLS).
+/// This value is incorrect for fMP4 segments (should be 0), causing
+/// subtitle timing offset.
+///
+/// This interceptor only rewrites subtitle/trickplay URIs in the master
+/// manifest to use a custom scheme. VTT files fetched via that scheme
+/// have their `X-TIMESTAMP-MAP` line fixed in the proxy response.
 ///
 /// Usage: wrap the HLS URL with `interceptedURL()` and create an
 /// `AVURLAsset` from the result. The interceptor must be retained
@@ -53,18 +58,7 @@ final class HLSManifestInterceptor: NSObject, Sendable {
     }
 }
 
-// MARK: - M3U8Decoder types
-
-extension HLSManifestInterceptor {
-
-    /// Decodable representation of an HLS master playlist.
-    struct MasterPlaylist: Decodable {
-        let extm3u: Bool
-        let ext_x_media: [EXT_X_MEDIA]
-        let ext_x_i_frame_stream_inf: [EXT_X_I_FRAME_STREAM_INF]
-        let streams: [VariantStream]
-    }
-}
+// MARK: - AVAssetResourceLoaderDelegate
 
 extension HLSManifestInterceptor: AVAssetResourceLoaderDelegate {
 
@@ -223,8 +217,6 @@ extension HLSManifestInterceptor: AVAssetResourceLoaderDelegate {
 
         logger.info("Fetched \(data.count) bytes from server")
 
-        content = fixTimestampMap(content)
-
         if content.contains("#EXT-X-STREAM-INF") {
             content = rewriteMasterManifest(content)
         }
@@ -235,32 +227,9 @@ extension HLSManifestInterceptor: AVAssetResourceLoaderDelegate {
         return Data(content.utf8)
     }
 
-    private func fixTimestampMap(_ content: String) -> String {
-        content.replacing(Self.timestampMapPattern) { match in
-            if match.output.contains("MPEGTS:0") {
-                return match.output
-            }
-            let fixed = match.output.replacing(/MPEGTS:\d+/, with: "MPEGTS:0")
-            logger.info("Fixed X-TIMESTAMP-MAP: \(match.output) → \(fixed)")
-            return fixed
-        }
-    }
-
-    /// Uses M3U8Decoder to parse the master manifest, then rewrites URLs:
-    /// - Subtitle/trickplay URIs → custom scheme (for X-TIMESTAMP-MAP fixing)
-    /// - Variant playlist URLs → absolute HTTP (for direct AVPlayer fetching)
+    /// Rewrites the master manifest: only subtitle/trickplay URIs → custom scheme.
+    /// Variant playlist URLs are left as-is (AVPlayer fetches them directly via HTTP).
     private func rewriteMasterManifest(_ content: String) -> String {
-        do {
-            let decoder = M3U8Decoder()
-            let playlist = try decoder.decode(MasterPlaylist.self, from: content)
-            return rewriteMasterManifestContent(content, playlist: playlist)
-        } catch {
-            logger.warning("M3U8Decoder failed: \(error.localizedDescription), falling back to line-based parsing")
-            return rewriteMasterManifestFallback(content)
-        }
-    }
-
-    private func rewriteMasterManifestContent(_ content: String, playlist: MasterPlaylist) -> String {
         let originalComponents = URLComponents(url: originalURL, resolvingAgainstBaseURL: false)!
         var basePath = (originalComponents.path as NSString).deletingLastPathComponent
         if !basePath.hasSuffix("/") {
@@ -285,134 +254,13 @@ extension HLSManifestInterceptor: AVAssetResourceLoaderDelegate {
                     appendQueryItems: originalQueryItems,
                     targetScheme: Self.scheme
                 )
-                i = lines.index(after: i)
-                continue
-            }
-
-            if line.hasPrefix("#EXT-X-IMAGE-STREAM-INF:") && line.contains("URI=\"") {
+            } else if line.hasPrefix("#EXT-X-IMAGE-STREAM-INF:") && line.contains("URI=\"") {
                 lines[i] = rewriteURIAttribute(
                     in: line,
                     baseURL: baseURL,
                     appendQueryItems: originalQueryItems,
                     targetScheme: Self.scheme
                 )
-                i = lines.index(after: i)
-                continue
-            }
-
-            if line.hasPrefix("#EXT-X-STREAM-INF:") {
-                var searchIndex = lines.index(after: i)
-                while searchIndex < lines.endIndex {
-                    let nextLine = lines[searchIndex].trimmingCharacters(in: .whitespaces)
-                    if nextLine.isEmpty {
-                        searchIndex = lines.index(after: searchIndex)
-                        continue
-                    }
-                    if !nextLine.hasPrefix("#") {
-                        if let resolved = URL(string: nextLine, relativeTo: baseURL) {
-                            let absolute = resolved.absoluteURL
-                            if absolute.scheme != Self.scheme {
-                                let resolvedComponents = URLComponents(url: absolute, resolvingAgainstBaseURL: false)!
-                                let existingParamNames = Set((resolvedComponents.queryItems ?? []).compactMap(\.name))
-                                let newParams = originalQueryItems.filter { !existingParamNames.contains($0.name) }
-                                var mergedComponents = resolvedComponents
-                                if !newParams.isEmpty {
-                                    mergedComponents.queryItems = (resolvedComponents.queryItems ?? []) + newParams
-                                }
-                                if let rewritten = mergedComponents.url {
-                                    logger.info("Variant playlist URL: \(nextLine) → \(rewritten.absoluteString)")
-                                    lines[searchIndex] = rewritten.absoluteString
-                                }
-                            } else {
-                                logger.warning("Variant URL already has scheme \(Self.scheme)")
-                            }
-                        } else {
-                            logger.warning("Failed to resolve variant URL: \(nextLine)")
-                        }
-                    }
-                    break
-                }
-                i = lines.index(after: i)
-                continue
-            }
-
-            i = lines.index(after: i)
-        }
-
-        logger.info("Parsed master manifest: \(playlist.ext_x_media.count) media, \(playlist.streams.count) streams, \(playlist.ext_x_i_frame_stream_inf.count) iframe streams")
-
-        return lines.joined(separator: "\n")
-    }
-
-    /// Fallback: line-based parsing when M3U8Decoder fails
-    private func rewriteMasterManifestFallback(_ content: String) -> String {
-        let originalComponents = URLComponents(url: originalURL, resolvingAgainstBaseURL: false)!
-        var basePath = (originalComponents.path as NSString).deletingLastPathComponent
-        if !basePath.hasSuffix("/") {
-            basePath.append("/")
-        }
-        var baseURLComponents = originalComponents
-        baseURLComponents.path = basePath
-        baseURLComponents.query = nil
-        let baseURL = baseURLComponents.url!
-        let originalQueryItems = originalComponents.queryItems ?? []
-
-        var lines = content.components(separatedBy: .newlines)
-        var i = lines.startIndex
-        while i < lines.endIndex {
-            let line = lines[i].trimmingCharacters(in: .whitespaces)
-
-            if line.hasPrefix("#EXT-X-MEDIA:") && line.contains("URI=\"") {
-                lines[i] = rewriteURIAttribute(
-                    in: line,
-                    baseURL: baseURL,
-                    appendQueryItems: originalQueryItems,
-                    targetScheme: Self.scheme
-                )
-                i = lines.index(after: i)
-                continue
-            }
-
-            if line.hasPrefix("#EXT-X-IMAGE-STREAM-INF:") && line.contains("URI=\"") {
-                lines[i] = rewriteURIAttribute(
-                    in: line,
-                    baseURL: baseURL,
-                    appendQueryItems: originalQueryItems,
-                    targetScheme: Self.scheme
-                )
-                i = lines.index(after: i)
-                continue
-            }
-
-            if line.hasPrefix("#EXT-X-STREAM-INF:") {
-                var searchIndex = lines.index(after: i)
-                while searchIndex < lines.endIndex {
-                    let nextLine = lines[searchIndex].trimmingCharacters(in: .whitespaces)
-                    if nextLine.isEmpty {
-                        searchIndex = lines.index(after: searchIndex)
-                        continue
-                    }
-                    if !nextLine.hasPrefix("#") {
-                        if let resolved = URL(string: nextLine, relativeTo: baseURL) {
-                            let absolute = resolved.absoluteURL
-                            if absolute.scheme != Self.scheme {
-                                let resolvedComponents = URLComponents(url: absolute, resolvingAgainstBaseURL: false)!
-                                let existingParamNames = Set((resolvedComponents.queryItems ?? []).compactMap(\.name))
-                                let newParams = originalQueryItems.filter { !existingParamNames.contains($0.name) }
-                                var mergedComponents = resolvedComponents
-                                if !newParams.isEmpty {
-                                    mergedComponents.queryItems = (resolvedComponents.queryItems ?? []) + newParams
-                                }
-                                if let rewritten = mergedComponents.url {
-                                    lines[searchIndex] = rewritten.absoluteString
-                                }
-                            }
-                        }
-                    }
-                    break
-                }
-                i = lines.index(after: i)
-                continue
             }
 
             i = lines.index(after: i)

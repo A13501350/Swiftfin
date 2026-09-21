@@ -17,9 +17,6 @@ extension SwiftfinApp {
 
     static func configure() {
 
-        // Register VTT interceptor to fix X-TIMESTAMP-MAP in subtitle responses
-        URLProtocol.registerClass(VTTResponseInterceptor.self)
-
         // Logging
         LoggingSystem.bootstrap { label in
 
