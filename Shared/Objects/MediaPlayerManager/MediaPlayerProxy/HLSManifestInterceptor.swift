@@ -227,8 +227,9 @@ extension HLSManifestInterceptor: AVAssetResourceLoaderDelegate {
         return Data(content.utf8)
     }
 
-    /// Rewrites the master manifest: only subtitle/trickplay URIs → custom scheme.
-    /// Variant playlist URLs are left as-is (AVPlayer fetches them directly via HTTP).
+    /// Rewrites the master manifest:
+    /// - Subtitle/trickplay URIs → custom scheme (for X-TIMESTAMP-MAP fixing)
+    /// - Variant playlist URLs → absolute HTTP (for direct AVPlayer fetching)
     private func rewriteMasterManifest(_ content: String) -> String {
         let originalComponents = URLComponents(url: originalURL, resolvingAgainstBaseURL: false)!
         var basePath = (originalComponents.path as NSString).deletingLastPathComponent
@@ -261,6 +262,35 @@ extension HLSManifestInterceptor: AVAssetResourceLoaderDelegate {
                     appendQueryItems: originalQueryItems,
                     targetScheme: Self.scheme
                 )
+            } else if line.hasPrefix("#EXT-X-STREAM-INF:") {
+                // Variant playlist URL follows after blank lines
+                var searchIndex = lines.index(after: i)
+                while searchIndex < lines.endIndex {
+                    let nextLine = lines[searchIndex].trimmingCharacters(in: .whitespaces)
+                    if nextLine.isEmpty {
+                        searchIndex = lines.index(after: searchIndex)
+                        continue
+                    }
+                    if !nextLine.hasPrefix("#") {
+                        // Rewrite to absolute HTTP so AVPlayer fetches directly
+                        if let resolved = URL(string: nextLine, relativeTo: baseURL) {
+                            let absolute = resolved.absoluteURL
+                            if absolute.scheme != Self.scheme {
+                                let resolvedComponents = URLComponents(url: absolute, resolvingAgainstBaseURL: false)!
+                                let existingParamNames = Set((resolvedComponents.queryItems ?? []).compactMap(\.name))
+                                let newParams = originalQueryItems.filter { !existingParamNames.contains($0.name) }
+                                var mergedComponents = resolvedComponents
+                                if !newParams.isEmpty {
+                                    mergedComponents.queryItems = (resolvedComponents.queryItems ?? []) + newParams
+                                }
+                                if let rewritten = mergedComponents.url {
+                                    lines[searchIndex] = rewritten.absoluteString
+                                }
+                            }
+                        }
+                    }
+                    break
+                }
             }
 
             i = lines.index(after: i)
