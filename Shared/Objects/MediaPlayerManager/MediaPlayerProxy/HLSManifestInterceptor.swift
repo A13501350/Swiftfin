@@ -141,7 +141,7 @@ extension HLSManifestInterceptor: AVAssetResourceLoaderDelegate {
                 }
             }
 
-            let (data, response) = try await URLSession.shared.data(for: urlRequest)
+            var (data, response) = try await URLSession.shared.data(for: urlRequest)
 
             guard let httpResponse = response as? HTTPURLResponse,
                   (200..<300).contains(httpResponse.statusCode)
@@ -153,11 +153,25 @@ extension HLSManifestInterceptor: AVAssetResourceLoaderDelegate {
                 )
             }
 
+            if originalURL.path.hasSuffix(".vtt"),
+               var content = String(data: data, encoding: .utf8),
+               content.contains("X-TIMESTAMP-MAP")
+            {
+                let original = content
+                content = content.replacing(Self.timestampMapPattern) { match in
+                    match.output.replacing(/MPEGTS:\d+/, with: "MPEGTS:0")
+                }
+                logger.info("Fixed X-TIMESTAMP-MAP in VTT: \(original.prefix(120)) → \(content.prefix(120))")
+                data = Data(content.utf8)
+            }
+
             if let infoRequest = request.contentInformationRequest {
                 if originalURL.path.hasSuffix(".mp4") || originalURL.path.hasSuffix(".cmfv") || originalURL.path.hasSuffix(".cmfa") {
                     infoRequest.contentType = "public.mpeg-4"
                 } else if originalURL.path.hasSuffix(".m4s") {
                     infoRequest.contentType = "public.mpeg-4-segment"
+                } else if originalURL.path.hasSuffix(".vtt") {
+                    infoRequest.contentType = "text/vtt"
                 } else {
                     infoRequest.contentType = "public.data"
                 }
@@ -258,8 +272,6 @@ extension HLSManifestInterceptor: AVAssetResourceLoaderDelegate {
         let baseURL = baseURLComponents.url!
         let originalQueryItems = originalComponents.queryItems ?? []
 
-        logger.info("Base URL for relative resolution: \(baseURL.absoluteString)")
-
         var lines = content.components(separatedBy: .newlines)
         var i = lines.startIndex
 
@@ -296,7 +308,6 @@ extension HLSManifestInterceptor: AVAssetResourceLoaderDelegate {
                         searchIndex = lines.index(after: searchIndex)
                         continue
                     }
-                    logger.info("Found #EXT-X-STREAM-INF, next non-empty line[\(searchIndex)]: \(nextLine.prefix(200))")
                     if !nextLine.hasPrefix("#") {
                         if let resolved = URL(string: nextLine, relativeTo: baseURL) {
                             let absolute = resolved.absoluteURL
