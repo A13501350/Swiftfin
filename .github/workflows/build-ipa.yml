@@ -1,0 +1,69 @@
+name: Build IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: macos-26
+
+    env:
+      XCODE_VERSION: "26.6"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true
+
+      - name: Install Homebrew dependencies
+        run: brew bundle --file Brewfile
+
+      - name: Restore Xcode cache
+        uses: irgaly/xcode-cache@v1
+        with:
+          key: xcode-cache-${{ github.sha }}
+          restore-keys: xcode-cache-
+          deriveddata-directory: build/DerivedData
+          sourcepackages-directory: build/DerivedData/SourcePackages
+
+      - name: Resolve Swift packages
+        run: xcodebuild -resolvePackageDependencies -project Swiftfin.xcodeproj -scheme Swiftfin -skipMacroValidation 2>&1 | xcbeautify --renderer github-actions
+
+      - name: Build app
+        run: xcodebuild -project Swiftfin.xcodeproj -scheme Swiftfin -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build/DerivedData CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" -skipMacroValidation build 2>&1 | xcbeautify --renderer github-actions
+
+      - name: Rename app for sideload
+        run: |
+          APP_PATH="$(find build/DerivedData/Build/Products/Release-iphoneos -maxdepth 1 -name '*.app' | head -n 1)"
+          if [ -z "$APP_PATH" ]; then
+            echo "no .app found"
+            exit 1
+          fi
+          /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string SwiftfinDev" "$APP_PATH/Info.plist" 2>/dev/null || \
+          /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName SwiftfinDev" "$APP_PATH/Info.plist"
+
+      - name: Package IPA
+        run: |
+          APP_PATH="$(find build/DerivedData/Build/Products/Release-iphoneos -maxdepth 1 -name '*.app' | head -n 1)"
+          if [ -z "$APP_PATH" ]; then
+            echo "no .app found"
+            exit 1
+          fi
+          mkdir -p build/Payload
+          cp -R "$APP_PATH" build/Payload/
+          cd build
+          zip -qry SwiftfinDev.ipa Payload/
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: SwiftfinDev-ipa
+          path: build/SwiftfinDev.ipa
+          if-no-files-found: error
